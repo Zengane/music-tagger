@@ -1,0 +1,18 @@
+# torch/torchvision/torchaudio are pinned to the CUDA 13.0 build on purpose.
+#
+# v1 died here: `muq` depends on x_clip, which depends on torchvision, and pip's
+# resolver happily swapped the CUDA torch for a CPU wheel off PyPI. Everything
+# still ran, just ~40x slower, on the CPU. Pinning the +cu130 local version
+# means pip refuses to substitute a CPU build instead of doing it silently.
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.13.0+cu130
+torchvision==0.28.0+cu130
+torchaudio==2.11.0+cu130
+
+muq>=0.1.0
+transformers>=4.40
+scikit-learn>=1.4
+numpy>=1.26
+librosa>=0.10
+soundfile>=0.12
+flask>=3.0

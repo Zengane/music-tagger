@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Music Tagger v2</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --text:#e6e8ee; --dim:#8b93a5; --accent:#5cc8ff; --good:#4ade80;
+  --warn:#fbbf24; --bad:#f87171; --mood:#22c55e; --sound:#38bdf8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
+button{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--accent);color:#04121b;border-color:var(--accent);font-weight:600}
+input[type=text]{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+label.chk{display:inline-flex;align-items:center;gap:5px;color:var(--dim);cursor:pointer;user-select:none}
+
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px}
+.badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+.badge.ok{color:var(--good);border-color:#1d4d33}
+.badge.err{color:var(--bad);border-color:#5c2626}
+.spacer{flex:1}
+
+.bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.bar input[type=text]{flex:1;min-width:220px}
+
+main{flex:1;display:flex;min-height:0}
+#list{width:44%;min-width:320px;overflow-y:auto;border-right:1px solid var(--line)}
+#detail{flex:1;overflow-y:auto;padding:14px 18px}
+
+.row{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:hover{background:var(--panel)}
+.row.sel{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.row .nm{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .sub{margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.dot{width:7px;height:7px;border-radius:99px;flex:none;display:inline-block}
+.dot.pending{background:#4b5563}.dot.done{background:var(--good)}
+.dot.saved{background:var(--accent)}.dot.err{background:var(--bad)}
+
+.chip{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.chip.mood{border-color:#276b41;color:#7ee2a8}
+.chip.sound{border-color:#1c556f;color:#7fd4f5}
+.chip.old{border-style:dashed;opacity:.65}
+
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin:18px 0 8px;font-weight:600}
+audio{width:100%;margin-top:6px}
+.fname{font-size:15px;font-weight:600;word-break:break-word}
+.fpath{font-size:11px;color:var(--dim);word-break:break-all;margin-top:2px}
+
+.tag{display:grid;grid-template-columns:150px 1fr 92px;align-items:center;gap:10px;padding:4px 6px;border-radius:6px;cursor:pointer}
+.tag:hover{background:var(--panel)}
+.tag .nm{font-size:13px;display:flex;align-items:center;gap:6px}
+.tag.on .nm{font-weight:600}
+.tag.on .nm::before{content:"✓";color:var(--good)}
+.tag.off .nm::before{content:"·";color:var(--dim)}
+.meter{position:relative;height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.meter i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--dim)}
+.tag.on .meter i{background:var(--good)}
+.thr{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--warn);opacity:.8}
+.num{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+.src{font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid var(--line);color:var(--dim)}
+.src.zeroshot{color:var(--warn);border-color:#66500f}
+.src.manual{color:var(--bad);border-color:#5c2626}
+
+.empty{color:var(--dim);padding:40px 20px;text-align:center}
+.err{color:var(--bad)}
+.prog{height:3px;background:var(--panel2)}
+.prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:0;max-width:640px;width:90vw}
+dialog::backdrop{background:#000a}
+.dlg-h{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:600}
+.dlg-b{padding:14px 16px;max-height:60vh;overflow:auto}
+.dlg-f{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:600}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Music Tagger v2</h1>
+  <span class="badge" id="b-status">starting…</span>
+  <span class="badge" id="b-encoder"></span>
+  <span class="badge" id="b-device"></span>
+  <span class="spacer"></span>
+  <span class="badge" id="b-counts"></span>
+  <button onclick="showModel()">Model</button>
+  <button onclick="retrain()" id="btn-retrain">Retrain</button>
+</header>
+
+<div class="bar">
+  <input type="text" id="folder" placeholder="Folder with music…">
+  <button onclick="browse()">Browse</button>
+  <label class="chk"><input type="checkbox" id="recursive" checked> subfolders</label>
+  <label class="chk"><input type="checkbox" id="onlyuntagged"> untagged only</label>
+  <button class="primary" onclick="scan()">Scan</button>
+  <span class="spacer"></span>
+  <button onclick="analyzeAll()" id="btn-analyze">Analyze all</button>
+  <button onclick="saveAll()" id="btn-saveall">Save all analyzed</button>
+</div>
+<div class="prog"><i id="prog"></i></div>
+
+<main>
+  <div id="list"><div class="empty">Pick a folder and hit Scan.</div></div>
+  <div id="detail"><div class="empty">No file selected.</div></div>
+</main>
+
+<dialog id="dlg">
+  <div class="dlg-h" id="dlg-h">Model</div>
+  <div class="dlg-b" id="dlg-b"></div>
+  <div class="dlg-f"><button onclick="dlg.close()">Close</button></div>
+</dialog>
+
+<script>
+let files = [];       // {name, rel, path, existing_tags, other_tags, res, selected:Set, status}
+let cur = -1;
+let MOOD = [], SOUND = [], modelInfo = null;
+const $ = id => document.getElementById(id);
+const dlg = $('dlg');
+
+// ── boot ────────────────────────────────────────────────────────────────────
+async function poll() {
+  const s = await fetch('/api/status').then(r => r.json());
+  const b = $('b-status');
+  b.textContent = s.status === 'ready' ? 'ready' : (s.detail || s.status);
+  b.className = 'badge ' + (s.status === 'ready' ? 'ok' : (s.status === 'loading' ? '' : 'err'));
+  $('b-device').textContent = s.device || '';
+  $('b-encoder').textContent = s.encoder || '';
+  if (s.status !== 'ready') return setTimeout(poll, 1200);
+  const m = await fetch('/api/tags-meta').then(r => r.json());
+  MOOD = m.mood; SOUND = m.sound;
+  modelInfo = await fetch('/api/model-info').then(r => r.json());
+}
+poll();
+
+// ── folder + scan ───────────────────────────────────────────────────────────
+async function browse() {
+  const d = await fetch('/api/browse').then(r => r.json());
+  if (d.path) { $('folder').value = d.path; scan(); }
+}
+
+async function scan() {
+  const folder = $('folder').value.trim();
+  if (!folder) return;
+  const d = await fetch('/api/scan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({folder, recursive: $('recursive').checked,
+                          only_untagged: $('onlyuntagged').checked})
+  }).then(r => r.json());
+  if (d.error) return alert(d.error);
+  files = d.files.map(f => ({...f, res: null, selected: null, status: 'pending'}));
+  cur = -1;
+  renderList(); renderDetail(); updateCounts();
+}
+
+function updateCounts() {
+  const done = files.filter(f => f.res).length;
+  const saved = files.filter(f => f.status === 'saved').length;
+  $('b-counts').textContent = `${files.length} files · ${done} analyzed · ${saved} saved`;
+}
+
+// ── list ────────────────────────────────────────────────────────────────────
+function renderList() {
+  const el = $('list');
+  if (!files.length) { el.innerHTML = '<div class="empty">Nothing found.</div>'; return; }
+  el.innerHTML = files.map((f, i) => {
+    const tags = f.selected ? [...f.selected] : f.existing_tags;
+    const chips = tags.map(t => `<span class="chip ${MOOD.includes(t)?'mood':'sound'} ${f.selected?'':'old'}">${t}</span>`).join('');
+    return `<div class="row ${i===cur?'sel':''}" onclick="select(${i})">
+      <div class="nm"><span class="dot ${f.status}"></span> ${esc(f.rel || f.name)}</div>
+      <div class="sub">${chips || '<span class="chip old">untagged</span>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function select(i) {
+  cur = i; renderList(); renderDetail();
+  const f = files[i];
+  if (!f.res) await analyzeOne(i);
+}
+
+// ── analysis ────────────────────────────────────────────────────────────────
+async function analyzeOne(i) {
+  const f = files[i];
+  const d = await fetch('/api/analyze', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: f.path})
+  }).then(r => r.json());
+  if (d.error) { f.status = 'err'; f.error = d.error; }
+  else { f.res = d; f.selected = new Set(d.selected); f.status = 'done'; }
+  if (cur === i) renderDetail();
+  renderList(); updateCounts();
+}
+
+async function analyzeAll() {
+  const todo = files.filter(f => !f.res).map(f => f.path);
+  if (!todo.length) return;
+  $('btn-analyze').disabled = true;
+  const r = await fetch('/api/analyze-batch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({paths: todo})
+  }).then(r => r.json());
+  if (r.error) { $('btn-analyze').disabled = false; return alert(r.error); }
+
+  const tick = async () => {
+    const p = await fetch('/api/batch-progress').then(r => r.json());
+    $('prog').style.width = (100 * p.done / Math.max(1, p.total)) + '%';
+    if (p.running) return setTimeout(tick, 400);
+    const full = await fetch('/api/batch-progress?results=1').then(r => r.json());
+    for (const f of files) {
+      const d = full.results[f.path];
+      if (!d) continue;
+      if (d.error) { f.status = 'err'; f.error = d.error; }
+      else { f.res = d; f.selected = new Set(d.selected); f.status = 'done'; }
+    }
+    $('prog').style.width = '0%';
+    $('btn-analyze').disabled = false;
+    renderList(); renderDetail(); updateCounts();
+  };
+  tick();
+}
+
+// ── detail ──────────────────────────────────────────────────────────────────
+function renderDetail() {
+  const el = $('detail');
+  if (cur < 0 || !files[cur]) { el.innerHTML = '<div class="empty">No file selected.</div>'; return; }
+  const f = files[cur];
+
+  let body = `<div class="fname">${esc(f.name)}</div>
+    <div class="fpath">${esc(f.path)}</div>
+    <audio controls preload="none" src="/api/audio?path=${encodeURIComponent(f.path)}"></audio>`;
+
+  if (f.other_tags?.length)
+    body += `<div class="sub" style="margin-top:8px">${f.other_tags.map(t=>`<span class="chip old">${esc(t)}</span>`).join('')}</div>`;
+
+  if (f.status === 'err') body += `<p class="err">${esc(f.error || 'failed')}</p>`;
+  else if (!f.res) body += `<p class="empty">Analyzing…</p>`;
+  else body += group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
+    <div style="margin-top:18px;display:flex;gap:8px">
+      <button class="primary" onclick="save()">Save tags</button>
+      <button onclick="reset()">Reset to suggestions</button>
+      <button onclick="clearAll()">Clear all</button>
+    </div>
+    <p class="fpath" style="margin-top:10px">
+      <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> save &amp; next · digits toggle nothing (click tags)
+    </p>`;
+  el.innerHTML = body;
+}
+
+function group(title, tags, f) {
+  const rows = tags.map(t => {
+    const s = f.res.scores[t];
+    const on = f.selected.has(t);
+    // Probe scores are probabilities; zero-shot scores are cosine similarities.
+    // Both get drawn on a 0..1 bar scaled so the threshold sits at the same place.
+    const pct = s.source === 'probe' ? s.score * 100
+                                     : Math.max(0, Math.min(1, (s.score + 0.2) / 0.6)) * 100;
+    const tpct = s.source === 'probe' ? s.threshold * 100
+                                      : Math.max(0, Math.min(1, (s.threshold + 0.2) / 0.6)) * 100;
+    const val = s.source === 'probe' ? (s.score * 100).toFixed(0) + '%' : s.score.toFixed(3);
+    const srcTag = s.source === 'probe' ? '' : `<span class="src ${s.source}">${s.source}</span>`;
+    return `<div class="tag ${on ? 'on' : 'off'}" onclick="toggle('${t}')">
+      <div class="nm">${t}${srcTag}</div>
+      <div class="meter"><i style="width:${pct}%"></i><span class="thr" style="left:${tpct}%"></span></div>
+      <div class="num">${val}</div>
+    </div>`;
+  }).join('');
+  return `<h2>${title}</h2>${rows}`;
+}
+
+function toggle(t) {
+  const f = files[cur];
+  f.selected.has(t) ? f.selected.delete(t) : f.selected.add(t);
+  if (f.status === 'saved') f.status = 'done';
+  renderDetail(); renderList();
+}
+
+function reset() { const f = files[cur]; f.selected = new Set(f.res.selected); renderDetail(); renderList(); }
+function clearAll() { files[cur].selected = new Set(); renderDetail(); renderList(); }
+
+// ── saving ──────────────────────────────────────────────────────────────────
+async function saveFile(f) {
+  const d = await fetch('/api/save', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: f.path, tags: [...f.selected]})
+  }).then(r => r.json());
+  if (d.error) { alert(d.error); return false; }
+  f.existing_tags = [...f.selected];
+  f.status = 'saved';
+  return true;
+}
+
+async function save() {
+  if (cur < 0 || !files[cur].selected) return;
+  if (await saveFile(files[cur])) { renderList(); updateCounts(); }
+}
+
+async function saveAll() {
+  const todo = files.filter(f => f.selected && f.status !== 'saved');
+  if (!todo.length) return;
+  if (!confirm(`Write Mood/Sound tags to ${todo.length} sidecar file(s)?\n\nGame tags, star ratings and emoji tags are preserved.`)) return;
+  $('btn-saveall').disabled = true;
+  for (const f of todo) { await saveFile(f); }
+  $('btn-saveall').disabled = false;
+  renderList(); updateCounts();
+}
+
+// ── model dialog + retrain ──────────────────────────────────────────────────
+function showModel() {
+  if (!modelInfo) return;
+  const s = modelInfo.meta.summary || {};
+  $('dlg-h').textContent = `Model — ${modelInfo.encoder}`;
+  const rows = Object.entries(modelInfo.tags).map(([t, d]) => `<tr>
+    <td>${t}</td><td class="n">${d.n_pos}</td>
+    <td class="n">${d.ap != null ? d.ap.toFixed(3) : '—'}</td>
+    <td class="n">${d.precision != null ? (d.precision*100).toFixed(0)+'%' : '—'}</td>
+    <td class="n">${d.recall != null ? (d.recall*100).toFixed(0)+'%' : '—'}</td>
+    <td><span class="src ${d.source}">${d.source}</span></td></tr>`).join('');
+  $('dlg-b').innerHTML = `
+    <p class="fpath">Trained on ${modelInfo.meta.n_train} labelled tracks · ${modelInfo.meta.dim}-dim embeddings<br>
+    macro AP ${(s.macro_ap||0).toFixed(3)} · macro AUC ${(s.macro_auc||0).toFixed(3)}</p>
+    <table><tr><th>tag</th><th class="n">examples</th><th class="n">AP</th>
+    <th class="n">precision</th><th class="n">recall</th><th>source</th></tr>${rows}</table>
+    <p class="fpath">Precision/recall are cross-validated: what to expect on files the model hasn't seen.</p>`;
+  dlg.showModal();
+}
+
+async function retrain() {
+  const library = $('folder').value.trim() || (modelInfo?.meta?.library || '');
+  if (!confirm(`Retrain on all tagged files under:\n${library}\n\nThis folds in every correction you've saved. Takes a few minutes.`)) return;
+  $('btn-retrain').disabled = true;
+  const r = await fetch('/api/retrain', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({library})
+  }).then(r => r.json());
+  if (r.error) { $('btn-retrain').disabled = false; return alert(r.error); }
+  const tick = async () => {
+    const p = await fetch('/api/retrain-progress').then(r => r.json());
+    if (p.running) { $('b-status').textContent = 'retraining…'; return setTimeout(tick, 1500); }
+    $('btn-retrain').disabled = false;
+    $('b-status').textContent = 'ready';
+    modelInfo = await fetch('/api/model-info').then(r => r.json());
+    if (p.error) alert('Retrain failed: ' + p.error);
+    else { $('dlg-h').textContent = 'Retrain complete';
+           $('dlg-b').innerHTML = `<pre style="white-space:pre-wrap;font-size:11px">${esc(p.log)}</pre>`;
+           dlg.showModal(); }
+  };
+  tick();
+}
+
+// ── keys ────────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || dlg.open) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (cur < files.length - 1) select(cur + 1); }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); if (cur > 0) select(cur - 1); }
+  if (e.key === 'Enter')     { e.preventDefault(); save().then(() => { if (cur < files.length - 1) select(cur + 1); }); }
+});
+</script>
+</body>
+</html>
