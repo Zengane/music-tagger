@@ -13,14 +13,12 @@ import json
 import time
 from pathlib import Path
 
-import numpy as np
-
 from mtag import console, probes
 from mtag.dataset import collect_labelled, embed_all, cli_progress
+from mtag.encoders import ENCODERS, get_encoder
+from mtag.taxonomy import ALL_TAGS
 
 console.init()
-from mtag.encoders import ENCODERS, get_encoder
-from mtag.taxonomy import ALL_TAGS, MOOD_TAGS
 
 RESULTS = Path(__file__).resolve().parent / "results"
 

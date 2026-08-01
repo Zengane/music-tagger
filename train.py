@@ -12,15 +12,13 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
-
 from mtag import console, probes
 from mtag.dataset import collect_labelled, embed_all, cli_progress
-
-console.init()
 from mtag.encoders import get_encoder
 from mtag.model import Tagger, build_zeroshot, MODEL_PATH
 from mtag.taxonomy import ALL_TAGS
+
+console.init()
 
 RESULTS = Path(__file__).resolve().parent / "results"
 

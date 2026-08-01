@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from .taxonomy import ALL_TAGS, AUDIO_EXTS, FOLDER_ALIASES
+from .taxonomy import ALL_TAGS, AUDIO_EXTS
 from . import audio as A
 from .sidecar import read_taxonomy_tags
 

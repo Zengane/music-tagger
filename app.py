@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from flask import Flask, jsonify, render_template, request, send_file
 
-from mtag.dataset import EmbeddingCache, collect_labelled
+from mtag.dataset import EmbeddingCache
 from mtag.encoders import get_encoder
 from mtag.model import MODEL_PATH, Tagger
 from mtag.sidecar import read_taxonomy_tags, read_tags, write_tags
