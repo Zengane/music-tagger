@@ -64,7 +64,36 @@ audio ── ffmpeg ──> 12 windows spread across the whole track
   threshold set at a quantile of the library's own score distribution so the tag
   fires about 3x its current prevalence.
 - **Nothing else is touched.** Game tags, star ratings and emoji tags are read
-  from the existing sidecar and written straight back.
+  from the existing sidecar and written straight back. The tagger's vocabulary is
+  only the Mood and Sound groups, so it can never assign a ⭐ or a star rating —
+  `tests.py` asserts both that they survive a write and that no rating, emoji or
+  Game tag appears in the vocabulary at all.
+
+## Filing into mood folders
+
+The library is already arranged by mood — `Adventure/`, `Chill/`, `Tension/` —
+and folder names agree with sidecar mood tags 822 times out of 858. Ticking
+**move into mood folders on save** keeps that true for new files.
+
+A track carries 1.6 moods on average, so one has to be primary. The default is
+whichever mood the model scored highest; the dropdown above the Mood list
+overrides it per file.
+
+Existing folders are reused rather than duplicated: `Build-Up` files land in the
+`Build up` folder that's already there, and matching is case-insensitive. Moods
+with no folder yet (Bombastic-Heavy, Hopeful, Loss) get one created on demand.
+
+Every move is planned and confirmed before anything happens: you get a count per
+destination folder, a list of any folders that would be created, and a note of
+anything skipped. The sidecar moves with its track, an empty `.ts` folder left
+behind is cleaned up, and a move that would land on an existing filename is
+refused rather than overwriting it. Folders you made are never deleted, even
+once empty.
+
+Tag categories are not stored in the sidecars — those only hold
+`{"title": "Epic", "type": "sidecar"}`. The Mood/Sound split comes from
+`Mega Music Pack tag library.json`, mirrored in `taxonomy.py`; a test fails if
+the two drift apart.
 
 ## Setup
 

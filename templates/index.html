@@ -105,6 +105,12 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
   <button onclick="analyzeAll()" id="btn-analyze">Analyze all</button>
   <button onclick="saveAll()" id="btn-saveall">Save all analyzed</button>
 </div>
+<div class="bar">
+  <span style="color:var(--dim)">Library root</span>
+  <input type="text" id="library" placeholder="defaults to the scanned folder">
+  <label class="chk" title="File each track into a folder named after its primary mood tag">
+    <input type="checkbox" id="organize"> move into mood folders on save</label>
+</div>
 <div class="prog"><i id="prog"></i></div>
 
 <main>
@@ -122,6 +128,7 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
 let files = [];       // {name, rel, path, existing_tags, other_tags, res, selected:Set, status}
 let cur = -1;
 let MOOD = [], SOUND = [], modelInfo = null;
+let moodFolders = {};   // mood tag -> existing folder name in the library
 const $ = id => document.getElementById(id);
 const dlg = $('dlg');
 
@@ -155,9 +162,18 @@ async function scan() {
                           only_untagged: $('onlyuntagged').checked})
   }).then(r => r.json());
   if (d.error) return alert(d.error);
-  files = d.files.map(f => ({...f, res: null, selected: null, status: 'pending'}));
+  files = d.files.map(f => ({...f, res: null, selected: null, primary: null, status: 'pending'}));
   cur = -1;
   renderList(); renderDetail(); updateCounts();
+  loadMoodFolders();
+}
+
+async function loadMoodFolders() {
+  const library = libraryRoot();
+  if (!library) return;
+  const d = await fetch('/api/mood-folders?library=' + encodeURIComponent(library)).then(r => r.json());
+  if (!d.error) moodFolders = Object.fromEntries(
+    Object.entries(d.folders).filter(([, v]) => v));
 }
 
 function updateCounts() {
@@ -244,17 +260,43 @@ function renderDetail() {
 
   if (f.status === 'err') body += `<p class="err">${esc(f.error || 'failed')}</p>`;
   else if (!f.res) body += `<p class="empty">Analyzing…</p>`;
-  else body += group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
+  else body += primaryPicker(f) + group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
     <div style="margin-top:18px;display:flex;gap:8px">
       <button class="primary" onclick="save()">Save tags</button>
       <button onclick="reset()">Reset to suggestions</button>
       <button onclick="clearAll()">Clear all</button>
     </div>
     <p class="fpath" style="margin-top:10px">
-      <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> save &amp; next · digits toggle nothing (click tags)
+      <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> save &amp; next · click a tag to toggle it
     </p>`;
   el.innerHTML = body;
 }
+
+// The folder a track gets filed under. A track averages 1.6 moods, so one has
+// to be primary; default to the highest-scoring one, overridable per file.
+function primaryOf(f) {
+  const moods = [...f.selected].filter(t => MOOD.includes(t));
+  if (!moods.length) return null;
+  if (f.primary && moods.includes(f.primary)) return f.primary;
+  return moods.reduce((a, b) => (f.res.scores[b].score > f.res.scores[a].score ? b : a));
+}
+
+function primaryPicker(f) {
+  const moods = [...f.selected].filter(t => MOOD.includes(t));
+  if (!moods.length)
+    return `<h2>Folder</h2><p class="fpath">No mood tag selected — this file won't be moved.</p>`;
+  const p = primaryOf(f);
+  const opts = moods.map(t => `<option value="${t}" ${t===p?'selected':''}>${t}</option>`).join('');
+  const dest = moodFolders[p] || p;
+  return `<h2>Folder</h2>
+    <div style="display:flex;align-items:center;gap:10px">
+      <select onchange="setPrimary(this.value)"
+        style="font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px">${opts}</select>
+      <span class="fpath" style="margin:0">&rarr; ${esc(dest)}\\</span>
+    </div>`;
+}
+
+function setPrimary(t) { files[cur].primary = t; renderDetail(); }
 
 function group(title, tags, f) {
   const rows = tags.map(t => {
@@ -301,7 +343,9 @@ async function saveFile(f) {
 
 async function save() {
   if (cur < 0 || !files[cur].selected) return;
-  if (await saveFile(files[cur])) { renderList(); updateCounts(); }
+  if (!await saveFile(files[cur])) return;
+  if ($('organize').checked) await moveFiles([files[cur]]);
+  renderList(); renderDetail(); updateCounts();
 }
 
 async function saveAll() {
@@ -310,8 +354,63 @@ async function saveAll() {
   if (!confirm(`Write Mood/Sound tags to ${todo.length} sidecar file(s)?\n\nGame tags, star ratings and emoji tags are preserved.`)) return;
   $('btn-saveall').disabled = true;
   for (const f of todo) { await saveFile(f); }
+  if ($('organize').checked) await moveFiles(todo);
   $('btn-saveall').disabled = false;
-  renderList(); updateCounts();
+  renderList(); renderDetail(); updateCounts();
+}
+
+// ── moving into mood folders ────────────────────────────────────────────────
+function libraryRoot() { return $('library').value.trim() || $('folder').value.trim(); }
+
+async function moveFiles(list) {
+  const library = libraryRoot();
+  if (!library) { alert('Set a library root first.'); return; }
+
+  const items = list.map(f => ({path: f.path, mood: primaryOf(f)}))
+                    .filter(i => i.mood);
+  if (!items.length) return;
+
+  const p = await fetch('/api/organize-plan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({library, items})
+  }).then(r => r.json());
+  if (p.error) { alert(p.error); return; }
+
+  const doable = p.plans.filter(x => x.status === 'ok');
+  const skipped = p.plans.filter(x => x.status !== 'ok');
+  if (!doable.length) {
+    if (skipped.some(x => x.status !== 'already-there'))
+      alert('Nothing to move.\n' + summarise(skipped));
+    return;
+  }
+
+  const newFolders = [...new Set(doable.filter(x => x.creates_folder).map(x => x.folder))];
+  let msg = `Move ${doable.length} file(s) into mood folders under:\n${library}\n\n`
+          + Object.entries(doable.reduce((a, x) => (a[x.folder] = (a[x.folder]||0)+1, a), {}))
+                  .map(([k, v]) => `  ${k}\\  ${v}`).join('\n');
+  if (newFolders.length) msg += `\n\nCreates new folder(s): ${newFolders.join(', ')}`;
+  if (skipped.length) msg += `\n\nSkipped:\n` + summarise(skipped);
+  msg += `\n\nSidecars move with the files. Nothing is overwritten.`;
+  if (!confirm(msg)) return;
+
+  const r = await fetch('/api/organize', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({library, items: doable.map(x => ({path: x.src, mood: x.mood}))})
+  }).then(r => r.json());
+  if (r.error) { alert(r.error); return; }
+
+  const bySrc = Object.fromEntries(r.results.map(x => [x.src, x]));
+  for (const f of files) {
+    const res = bySrc[f.path];
+    if (res?.moved) { f.path = res.dst; f.rel = res.folder + '\\' + res.dst.split('\\').pop(); }
+  }
+  const failed = r.results.filter(x => !x.moved);
+  if (failed.length) alert(`${failed.length} file(s) did not move:\n` + summarise(failed));
+}
+
+function summarise(rows) {
+  const by = rows.reduce((a, x) => (a[x.status] = (a[x.status]||0)+1, a), {});
+  return Object.entries(by).map(([k, v]) => `  ${v} ${k}`).join('\n');
 }
 
 // ── model dialog + retrain ──────────────────────────────────────────────────
@@ -335,7 +434,7 @@ function showModel() {
 }
 
 async function retrain() {
-  const library = $('folder').value.trim() || (modelInfo?.meta?.library || '');
+  const library = libraryRoot() || (modelInfo?.meta?.library || '');
   if (!confirm(`Retrain on all tagged files under:\n${library}\n\nThis folds in every correction you've saved. Takes a few minutes.`)) return;
   $('btn-retrain').disabled = true;
   const r = await fetch('/api/retrain', {

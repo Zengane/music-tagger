@@ -20,7 +20,7 @@ from mtag.encoders import get_encoder
 from mtag.model import MODEL_PATH, Tagger
 from mtag.sidecar import read_taxonomy_tags, read_tags, write_tags
 from mtag.taxonomy import ALL_TAGS, AUDIO_EXTS, MOOD_TAGS, SOUND_TAGS
-from mtag import audio as A
+from mtag import audio as A, organize
 
 app = Flask(__name__)
 
@@ -210,6 +210,57 @@ def api_save():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/organize-plan", methods=["POST"])
+def api_organize_plan():
+    """Dry run: what moving these files would do. Changes nothing on disk."""
+    library = request.json.get("library", "")
+    items = request.json.get("items", [])  # [{path, mood}]
+    if not library or not os.path.isdir(library):
+        return jsonify({"error": "Invalid library folder"}), 400
+
+    plans = []
+    for it in items:
+        mood = it.get("mood")
+        if mood not in MOOD_TAGS:
+            plans.append({"src": it.get("path", ""), "status": "no-mood", "mood": mood})
+            continue
+        plans.append(organize.plan(it["path"], library, mood))
+    return jsonify({"plans": plans})
+
+
+@app.route("/api/organize", methods=["POST"])
+def api_organize():
+    library = request.json.get("library", "")
+    items = request.json.get("items", [])
+    if not library or not os.path.isdir(library):
+        return jsonify({"error": "Invalid library folder"}), 400
+
+    results = []
+    for it in items:
+        mood = it.get("mood")
+        if mood not in MOOD_TAGS:
+            results.append({"src": it.get("path", ""), "status": "no-mood", "moved": False})
+            continue
+        try:
+            results.append(organize.apply(organize.plan(it["path"], library, mood)))
+        except Exception as e:
+            traceback.print_exc()
+            results.append({"src": it["path"], "status": "error",
+                            "moved": False, "error": str(e)})
+    return jsonify({"results": results})
+
+
+@app.route("/api/mood-folders")
+def api_mood_folders():
+    library = request.args.get("library", "")
+    if not library or not os.path.isdir(library):
+        return jsonify({"error": "Invalid library folder"}), 400
+    existing = organize.mood_folders(library)
+    return jsonify({
+        "folders": {t: (existing[t].name if t in existing else None) for t in MOOD_TAGS}
+    })
 
 
 def _run_retrain(library: str):

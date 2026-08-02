@@ -16,8 +16,9 @@ from pathlib import Path
 
 import numpy as np
 
-from mtag import audio as A, console, probes
+from mtag import audio as A, console, organize, probes
 from mtag.sidecar import read_tags, read_taxonomy_tags, write_tags
+from mtag.taxonomy import ALL_TAGS, MOOD_TAGS, SOUND_TAGS
 
 console.init()
 
@@ -152,6 +153,78 @@ def test_probes():
           "positive example scores above a negative one")
 
 
+def test_organize():
+    print("mood folders")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        lib = tmp / "lib"
+        for name in ("Adventure", "Build up", "chill", "SFX"):
+            (lib / name).mkdir(parents=True)
+
+        found = organize.mood_folders(lib)
+        check(found["Adventure"].name == "Adventure", "exact folder name matches")
+        check(found.get("Build-Up") is not None and found["Build-Up"].name == "Build up",
+              "Build-Up finds the existing 'Build up' folder, not a new one")
+        check(found["Chill"].name == "chill", "match is case-insensitive")
+        check("Epic" not in found, "absent moods report no folder")
+        check(organize.target_folder(lib, "Epic") == lib / "Epic",
+              "a mood with no folder targets one named after the tag")
+
+        # Primary mood is the highest-scoring selected mood, ignoring Sound tags.
+        scores = {"Hype": {"score": 0.6}, "Tension": {"score": 0.9}, "Funky": {"score": 0.99}}
+        check(organize.primary_mood(["Hype", "Tension", "Funky"], scores) == "Tension",
+              "primary mood ignores Sound tags and picks the top score")
+        check(organize.primary_mood(["Funky"], scores) is None, "no mood tag means no folder")
+
+        src_dir = lib / "Adventure"
+        track = src_dir / "song.mp3"
+        track.write_bytes(b"audio")
+        (src_dir / ".ts").mkdir()
+        (src_dir / ".ts" / "song.mp3.json").write_text(
+            json.dumps({"tags": [{"title": "Epic"}, {"title": "5star"}]}), encoding="utf-8-sig")
+
+        p = organize.plan(track, lib, "Epic")
+        check(p["status"] == "ok" and p["creates_folder"], "plan reports a new folder")
+        check(track.exists(), "planning is a dry run")
+
+        res = organize.apply(p)
+        moved = lib / "Epic" / "song.mp3"
+        check(res["moved"] and moved.exists() and not track.exists(), "file moves")
+        check((lib / "Epic" / ".ts" / "song.mp3.json").exists(), "sidecar follows the file")
+        check(read_tags(moved) == ["Epic", "5star"], "tags survive the move")
+        check(not (src_dir / ".ts").exists(), "empty .ts folder is cleaned up")
+        check(src_dir.exists(), "the source mood folder itself is left alone")
+
+        check(organize.plan(moved, lib, "Epic")["status"] == "already-there",
+              "a file already in place is a no-op")
+
+        clash = lib / "Adventure" / "song.mp3"
+        clash.write_bytes(b"different audio")
+        cp = organize.plan(clash, lib, "Epic")
+        check(cp["status"] == "collision", "a name clash is refused")
+        check(organize.apply(cp)["moved"] is False, "refused moves do nothing")
+        check(moved.read_bytes() == b"audio", "the existing file is not overwritten")
+        check(clash.exists(), "the source file stays put on a collision")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_taxonomy_matches_library():
+    print("taxonomy vs TagSpaces tag library")
+    lib = Path(r"H:\Media Browser\Mega Music Pack\Mega Music Pack tag library.json")
+    if not lib.exists():
+        print("  SKIP  tag library not reachable")
+        return
+    groups = {g["title"]: [c["title"] for c in g["children"]]
+              for g in json.loads(lib.read_text(encoding="utf-8-sig"))["tagGroups"]}
+    check(groups.get("Mood") == MOOD_TAGS, "Mood group matches taxonomy.py")
+    check(groups.get("Sound") == SOUND_TAGS, "Sound group matches taxonomy.py")
+    # Ratings and Emojis are the user's own; the tagger must never assign them.
+    others = set(groups.get("Ratings", [])) | set(groups.get("Emojis 🎨", [])) | set(groups.get("Game", []))
+    check(not (others & set(ALL_TAGS)),
+          "no rating, emoji or Game tag is in the tagger's vocabulary")
+
+
 def test_ffmpeg():
     print("environment")
     ok = subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode == 0
@@ -161,7 +234,8 @@ def test_ffmpeg():
 
 
 if __name__ == "__main__":
-    for t in (test_ffmpeg, test_sidecar, test_windows, test_probes):
+    for t in (test_ffmpeg, test_sidecar, test_taxonomy_matches_library,
+              test_windows, test_organize, test_probes):
         t()
     print()
     if _failures:

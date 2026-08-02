@@ -15,11 +15,15 @@ from .sidecar import read_taxonomy_tags
 CACHE_ROOT = Path(__file__).resolve().parent.parent / "cache"
 
 
+def _key_parts(filepath: Path, size: int, mtime: float) -> str:
+    raw = f"{Path(filepath).resolve()}|{size}|{int(mtime)}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def _key(filepath: Path) -> str:
     """Cache key: path plus size and mtime, so re-encoded files re-embed."""
-    st = filepath.stat()
-    raw = f"{filepath.resolve()}|{st.st_size}|{int(st.st_mtime)}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    st = Path(filepath).stat()
+    return _key_parts(filepath, st.st_size, st.st_mtime)
 
 
 class EmbeddingCache:
@@ -33,6 +37,27 @@ class EmbeddingCache:
 
     def put(self, filepath: Path, vec: np.ndarray) -> None:
         np.save(self.dir / f"{_key(filepath)}.npy", vec.astype(np.float32))
+
+
+def rekey_caches(src: Path, dst: Path, size: int, mtime: float) -> int:
+    """Follow a moved file through every encoder's cache.
+
+    Cache keys include the path, so a file that moves into its mood folder would
+    otherwise look brand new and get re-embedded. Call this after the move, with
+    the size and mtime read *before* it.
+    """
+    if not CACHE_ROOT.exists():
+        return 0
+    old, new = _key_parts(src, size, mtime), _key_parts(dst, size, mtime)
+    moved = 0
+    for enc_dir in CACHE_ROOT.iterdir():
+        if not enc_dir.is_dir():
+            continue
+        old_p, new_p = enc_dir / f"{old}.npy", enc_dir / f"{new}.npy"
+        if old_p.exists() and not new_p.exists():
+            old_p.rename(new_p)
+            moved += 1
+    return moved
 
 
 def collect_labelled(root, exclude_dirs=("SFX",)) -> tuple[list[Path], np.ndarray]:
