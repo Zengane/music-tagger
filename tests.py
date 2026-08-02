@@ -18,7 +18,7 @@ import numpy as np
 
 from mtag import audio as A, console, organize, probes
 from mtag.sidecar import read_tags, read_taxonomy_tags, write_tags
-from mtag.taxonomy import ALL_TAGS, MOOD_TAGS, SOUND_TAGS
+from mtag.taxonomy import ALL_TAGS, AUDIO_EXTS, MOOD_TAGS, SOUND_TAGS
 
 console.init()
 
@@ -225,6 +225,139 @@ def test_taxonomy_matches_library():
           "no rating, emoji or Game tag is in the tagger's vocabulary")
 
 
+def test_skipping():
+    print("skipping renders and SFX")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        # Names must differ by more than case: Windows would merge them otherwise.
+        for rel in ("Chill/song.mp3",
+                    "Chill/theme Audio Extracted.wav",
+                    "Chill/other AUDIO EXTRACTED.wav",
+                    "SFX/Drone/drone_1.wav",
+                    "sfx/hit.wav"):
+            p = tmp / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"x")
+
+        found = {f.name for f in A.find_audio(tmp, AUDIO_EXTS)}
+        check(found == {"song.mp3"}, f"only the real track survives (got {sorted(found)})")
+
+        allf = A.find_audio(tmp, AUDIO_EXTS, skip_dirs=(), skip_patterns=())
+        check(len(allf) == 5, "opting out of skipping returns everything")
+
+        # Rendering out audio for Audition drops the result next to the original;
+        # those renders must never be tagged or counted as new music.
+        check(not any("audio extracted" in f.name.lower() for f in A.find_audio(tmp, AUDIO_EXTS)),
+              "the match is case-insensitive")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_tag_aliases():
+    print("tag aliases")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        f = tmp / "song.mp3"
+        f.write_bytes(b"x")
+        (tmp / ".ts").mkdir()
+        (tmp / ".ts" / "song.mp3.json").write_text(json.dumps({"tags": [
+            {"title": "Jazz"}, {"title": "Bombastic"}, {"title": "Sims"},
+            {"title": "Penny-Big-Breakaway"},
+        ]}), encoding="utf-8-sig")
+
+        # The bug this fixes: "Jazz" isn't in the library, so the file read as
+        # untagged and never trained.
+        check(read_taxonomy_tags(f) == ["Jazzy", "Bombastic-Heavy"],
+              "misspelled Mood/Sound tags resolve to real ones")
+        check("Penny's-Big-Breakaway" in read_tags(f), "renamed game tags resolve too")
+        check("Jazz" in read_tags(f, raw=True), "raw=True still shows what's on disk")
+
+        write_tags(f, ["Jazzy", "Chill"])
+        after = read_tags(f, raw=True)
+        check("Jazz" not in after, "saving clears the misspelled tag rather than keeping both")
+        check(sorted(t for t in after if t in ("Jazzy", "Chill")) == ["Chill", "Jazzy"],
+              "the corrected tags are written")
+        check("Sims" in after, "unrelated tags are still preserved")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_gametag():
+    print("game detection")
+    from mtag import gametag
+
+    cases = [
+        ("Freezeflame Galaxy (Ice) -  Super Mario Galaxy.m4a", "Mario-Galaxy"),
+        ("1. Trailer Theme - Super Mario Odyssey OST.mp3", "Mario-Odyssey"),
+        ("Shin Megami Tensei IV OST - K's Tavern.mp3", "SMT4"),
+        ("Clock Town First Day - The Legend of Zelda Majora's Mask OST.mp3", "N64-Zelda"),
+        ("Dizzy Sim- Sims Hot Date.mp3", "Sims"),
+        ("🎼C C Generals Zero Hour Soundtrack ｜ China.mp3", "Command-and-Conquer"),
+        ("- ブルーアーカイブ Blue Archive OST 3. Mischievous Step.mp3", "Blue-Archive"),
+        ("Battania Theme (Mount & Blade II Bannerlord Soundtrack).mp3", "Mount-&-Blade"),
+        ("05 Sneakman.mp3", None),
+        ("A Few Screws Loose.mp3", None),
+    ]
+    for name, want in cases:
+        got = gametag.detect(Path("/lib/Chill") / name)
+        check(got == want, f"{name[:44]!r} -> {got}")
+
+    # Longest phrase wins, or "Super Mario Galaxy" would match a bare "Mario".
+    check(gametag.from_text("Super Mario Galaxy 2 Soundtrack") == "Mario-Galaxy",
+          "longer phrases are matched first")
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        lib = tmp / "lib"
+        deep = lib / "Chill" / "A Hat in Time OST"
+        deep.mkdir(parents=True)
+        track = deep / "01 Main Theme.mp3"
+        track.write_bytes(b"x")
+        tag, src, is_new = gametag.detect_detail(track, lib)
+        check(tag == "A-Hat-In-Time", "falls back to the containing folder")
+        check("folder" in (src or ""), "and reports that it came from a folder")
+        check(is_new is False, "a known game is not flagged as new")
+
+        flat = lib / "Chill" / "01 Main Theme.mp3"
+        flat.write_bytes(b"x")
+        check(gametag.detect(flat, lib) is None,
+              "a mood folder is not treated as a game name")
+
+        # Most of a fresh drop is games the tag library hasn't heard of; the
+        # folder names them, but they're flagged so nothing invents a tag alone.
+        drop = lib / "Untagged" / "Bayonetta" / "DISC 3"
+        drop.mkdir(parents=True)
+        unknown = drop / "07 Battle.mp3"
+        unknown.write_bytes(b"x")
+        tag, src, is_new = gametag.detect_detail(unknown, lib)
+        check((tag, is_new) == ("Bayonetta", True),
+              f"an unknown game is proposed from its folder (got {tag!r}, new={is_new})")
+        check(gametag.detect(unknown, lib) is None,
+              "detect() stays limited to known tags")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    for folder, want in [
+        ("Wario World OST", "Wario-World"),
+        ("Best Mario Kart Tracks", "Mario-Kart"),
+        ("Terraria Soundtrack (1 4 4)", "Terraria"),
+        ("The Legend of Zelda Breath of the Wild Soundtrack",
+         "Legend-Of-Zelda-Breath-Of-The-Wild"),
+        ("VA-11 Hall-A", "VA-11-Hall-A"),
+        ("TF2", "TF2"),
+        ("OST", None),
+    ]:
+        got = gametag.tag_from_folder(folder)
+        check(got == want, f"{folder!r} -> {got!r}")
+
+    # Breath of the Wild used to match "legend of zelda" and land 123 tracks
+    # on the N64-Zelda tag.
+    check(gametag.from_text("The Legend of Zelda Breath of the Wild") is None,
+          "Breath of the Wild does not match N64-Zelda")
+    check(gametag.from_text("Zelda Ocarina of Time OST") == "N64-Zelda",
+          "Ocarina of Time still does")
+
+
 def test_fusion_text_slice():
     print("fusion text slice")
     from mtag.encoders import FusionEncoder
@@ -263,6 +396,7 @@ def test_ffmpeg():
 
 if __name__ == "__main__":
     for t in (test_ffmpeg, test_sidecar, test_taxonomy_matches_library,
+              test_skipping, test_tag_aliases, test_gametag,
               test_windows, test_organize, test_fusion_text_slice, test_probes):
         t()
     print()

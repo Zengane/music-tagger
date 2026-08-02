@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .taxonomy import ALL_TAGS
+from .taxonomy import ALL_TAGS, GAME_ALIASES, TAG_ALIASES
 
 APP_NAME = "TagSpaces"
 APP_VERSION = "6.5.3"
@@ -26,9 +26,17 @@ def read_sidecar(filepath) -> dict:
         return {}
 
 
-def read_tags(filepath) -> list[str]:
-    """All tag titles on a file, in sidecar order."""
-    return [t["title"] for t in read_sidecar(filepath).get("tags", []) if "title" in t]
+def read_tags(filepath, raw: bool = False) -> list[str]:
+    """All tag titles on a file, in sidecar order.
+
+    Misspelled tags are mapped to their real names unless `raw` is set — a file
+    tagged "Jazz" really is Jazzy, and reading it as an unknown tag is how 15
+    already-tagged tracks ended up looking untagged.
+    """
+    titles = [t["title"] for t in read_sidecar(filepath).get("tags", []) if "title" in t]
+    if raw:
+        return titles
+    return [TAG_ALIASES.get(t, GAME_ALIASES.get(t, t)) for t in titles]
 
 
 def read_taxonomy_tags(filepath) -> list[str]:
@@ -36,15 +44,31 @@ def read_taxonomy_tags(filepath) -> list[str]:
     return [t for t in read_tags(filepath) if t in ALL_TAGS]
 
 
-def write_tags(filepath, tags: list[str]) -> None:
+def _is_ours(title: str) -> bool:
+    """Whether writing Mood/Sound tags should replace this one.
+
+    Covers the misspellings too, so saving a file tagged "Jazz" leaves "Jazzy"
+    behind rather than both.
+    """
+    return title in ALL_TAGS or TAG_ALIASES.get(title) in ALL_TAGS
+
+
+def write_tags(filepath, tags: list[str], game: str | None = None) -> None:
     """Replace the Mood/Sound tags on a file, preserving everything else.
 
-    Game tags, star ratings and emoji tags are user-curated and never touched.
+    Star ratings and emoji tags are user-curated and never touched. `game` adds a
+    Game tag only when the file has none — an existing one is always kept, since
+    it was chosen by hand and this one was guessed from a filename.
     """
     p = Path(filepath)
     existing = read_sidecar(p)
-    kept = [t for t in existing.get("tags", []) if t.get("title") not in ALL_TAGS]
+    kept = [t for t in existing.get("tags", []) if not _is_ours(t.get("title", ""))]
     new = [{"title": tag, "type": "sidecar"} for tag in tags]
+    if game:
+        from .gametag import existing_game_tags
+
+        if not existing_game_tags([t.get("title", "") for t in kept]):
+            new.append({"title": game, "type": "sidecar"})
 
     ts_dir = p.parent / ".ts"
     ts_dir.mkdir(exist_ok=True)

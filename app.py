@@ -7,6 +7,7 @@ the ones it got wrong, and have those corrections feed the next training run.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import traceback
 import webbrowser
@@ -19,8 +20,8 @@ from mtag.dataset import EmbeddingCache
 from mtag.encoders import get_encoder
 from mtag.model import MODEL_PATH, Tagger
 from mtag.sidecar import read_taxonomy_tags, read_tags, write_tags
-from mtag.taxonomy import ALL_TAGS, AUDIO_EXTS, MOOD_TAGS, SOUND_TAGS
-from mtag import audio as A, organize
+from mtag.taxonomy import ALL_TAGS, AUDIO_EXTS, GAME_TAGS, MOOD_TAGS, SOUND_TAGS
+from mtag import audio as A, gametag, organize
 
 app = Flask(__name__)
 
@@ -98,7 +99,7 @@ def api_model_info():
 
 @app.route("/api/tags-meta")
 def api_tags_meta():
-    return jsonify({"mood": MOOD_TAGS, "sound": SOUND_TAGS})
+    return jsonify({"mood": MOOD_TAGS, "sound": SOUND_TAGS, "game": GAME_TAGS})
 
 
 @app.route("/api/browse")
@@ -121,17 +122,29 @@ def api_scan():
     if not folder or not os.path.isdir(folder):
         return jsonify({"error": "Invalid folder"}), 400
 
+    library = request.json.get("library") or folder
+
     files = []
     for f in A.find_audio(folder, AUDIO_EXTS, recursive=recursive):
         tax = read_taxonomy_tags(f)
         if only_untagged and tax:
             continue
+        others = [t for t in read_tags(f) if t not in ALL_TAGS]
+        have_game = gametag.existing_game_tags(others)
+        guess, source, is_new = (None, None, False) if have_game \
+            else gametag.detect_detail(f, library)
         files.append({
             "name": f.name,
             "rel": str(f.relative_to(folder)),
             "path": str(f),
             "existing_tags": tax,
-            "other_tags": [t for t in read_tags(f) if t not in ALL_TAGS],
+            "other_tags": others,
+            "game": have_game[0] if have_game else None,
+            # Only offered when the file has no game tag of its own; a hand-picked
+            # one always wins over a name guessed off the filename.
+            "game_guess": guess,
+            "game_guess_from": source,
+            "game_is_new": is_new,
         })
     return jsonify({"files": files})
 
@@ -200,13 +213,21 @@ def api_audio():
 def api_save():
     fp = request.json.get("path", "")
     tags = request.json.get("tags", [])
+    game = request.json.get("game") or None
     if not fp:
         return jsonify({"error": "No path"}), 400
     unknown = [t for t in tags if t not in ALL_TAGS]
     if unknown:
         return jsonify({"error": f"Unknown tags: {unknown}"}), 400
+    # A game tag not in the library is only written when the caller says so —
+    # most of a fresh drop is games the tag library hasn't heard of, but a typo
+    # shouldn't be able to invent one silently.
+    if game and game not in GAME_TAGS and not request.json.get("allow_new_game"):
+        return jsonify({"error": f"Unknown game tag: {game}"}), 400
+    if game and not re.fullmatch(r"[\w&'.\- ]{1,60}", game):
+        return jsonify({"error": f"Invalid game tag: {game!r}"}), 400
     try:
-        write_tags(fp, tags)
+        write_tags(fp, tags, game=game)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -25,6 +25,22 @@ MIN_POSITIVES = 12
 
 C_GRID = (0.1, 0.5, 1.0, 4.0, 16.0)
 
+# Threshold bias, per tag. Above 1 favours recall, below 1 favours precision.
+#
+# The default leans toward recall because a missing tag is invisible in
+# TagSpaces while a wrong one is one click to remove. Vocals is the exception:
+# it exists to filter tracks *out* of an edit, so a false positive quietly
+# retires a usable instrumental. Choir has the same job on a smaller scale.
+DEFAULT_BETA = 1.5
+TAG_BETA = {
+    "Vocals": 0.6,
+    "Choir": 0.9,
+}
+
+
+def beta_for(tag: str) -> float:
+    return TAG_BETA.get(tag, DEFAULT_BETA)
+
 
 def _fit_one(X, y, C):
     clf = LogisticRegression(
@@ -58,11 +74,8 @@ def out_of_fold_scores(X, y, n_splits=5, seed=0) -> tuple[np.ndarray, float]:
     return best, best_C
 
 
-def best_threshold(y, probs, beta=1.5) -> tuple[float, float, float, float]:
-    """Threshold maximising F-beta.
-
-    beta > 1 leans toward recall: a missed tag is invisible in TagSpaces, while
-    a wrong one is a single click to remove during review.
+def best_threshold(y, probs, beta=DEFAULT_BETA) -> tuple[float, float, float, float]:
+    """Threshold maximising F-beta. See TAG_BETA for why beta varies by tag.
 
     Returns (threshold, precision, recall, fbeta).
     """
@@ -103,7 +116,7 @@ def evaluate(X, Y, tags=ALL_TAGS, seed=0) -> dict:
             auc = roc_auc_score(y, oof)
         except ValueError:
             auc = float("nan")
-        thr, prec, rec, f = best_threshold(y, oof)
+        thr, prec, rec, f = best_threshold(y, oof, beta=beta_for(tag))
         prevalence = n_pos / len(y)
         rows.append({
             "tag": tag,

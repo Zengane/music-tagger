@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .taxonomy import SKIP_DIRS, SKIP_NAME_PATTERNS
+
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
@@ -78,7 +80,24 @@ def windows(filepath, sr: int, window_s: float, max_windows: int) -> np.ndarray:
     return out
 
 
-def find_audio(folder, exts, recursive: bool = True) -> list[Path]:
+def find_audio(folder, exts, recursive: bool = True,
+               skip_dirs=SKIP_DIRS, skip_patterns=SKIP_NAME_PATTERNS) -> list[Path]:
+    """Audio files under `folder`, minus the ones this tool has no business tagging.
+
+    Pass `skip_dirs=()` / `skip_patterns=()` to see everything.
+    """
     root = Path(folder)
     it = root.rglob("*") if recursive else root.iterdir()
-    return sorted(p for p in it if p.is_file() and p.suffix.lower() in exts)
+    skip_dirs = {d.lower() for d in skip_dirs}
+    out = []
+    for p in it:
+        if not (p.is_file() and p.suffix.lower() in exts):
+            continue
+        rel = p.relative_to(root)
+        if any(part.lower() in skip_dirs for part in rel.parts[:-1]):
+            continue
+        name = p.name.lower()
+        if any(pat in name for pat in skip_patterns):
+            continue
+        out.append(p)
+    return sorted(out)

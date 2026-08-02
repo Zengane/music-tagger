@@ -60,7 +60,7 @@ def rekey_caches(src: Path, dst: Path, size: int, mtime: float) -> int:
     return moved
 
 
-def collect_labelled(root, exclude_dirs=("SFX",)) -> tuple[list[Path], np.ndarray]:
+def collect_labelled(root) -> tuple[list[Path], np.ndarray]:
     """Every audio file under `root` that already carries Mood/Sound tags.
 
     Returns (paths, Y) where Y is a (n_files, n_tags) binary matrix aligned to
@@ -71,9 +71,6 @@ def collect_labelled(root, exclude_dirs=("SFX",)) -> tuple[list[Path], np.ndarra
     root = Path(root)
     paths, rows = [], []
     for f in A.find_audio(root, AUDIO_EXTS):
-        rel = f.relative_to(root)
-        if rel.parts and rel.parts[0] in exclude_dirs:
-            continue
         tags = read_taxonomy_tags(f)
         if not tags:
             continue
@@ -82,16 +79,8 @@ def collect_labelled(root, exclude_dirs=("SFX",)) -> tuple[list[Path], np.ndarra
     return paths, np.array(rows, dtype=np.int8)
 
 
-def collect_untagged(root, exclude_dirs=("SFX",)) -> list[Path]:
-    root = Path(root)
-    out = []
-    for f in A.find_audio(root, AUDIO_EXTS):
-        rel = f.relative_to(root)
-        if rel.parts and rel.parts[0] in exclude_dirs:
-            continue
-        if not read_taxonomy_tags(f):
-            out.append(f)
-    return out
+def collect_untagged(root) -> list[Path]:
+    return [f for f in A.find_audio(Path(root), AUDIO_EXTS) if not read_taxonomy_tags(f)]
 
 
 def embed_all(encoder, paths: list[Path], progress=None) -> tuple[np.ndarray, list[Path]]:

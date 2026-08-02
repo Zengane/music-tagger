@@ -127,7 +127,7 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
 <script>
 let files = [];       // {name, rel, path, existing_tags, other_tags, res, selected:Set, status}
 let cur = -1;
-let MOOD = [], SOUND = [], modelInfo = null;
+let MOOD = [], SOUND = [], GAMES = [], modelInfo = null;
 let moodFolders = {};   // mood tag -> existing folder name in the library
 const $ = id => document.getElementById(id);
 const dlg = $('dlg');
@@ -142,7 +142,7 @@ async function poll() {
   $('b-encoder').textContent = s.encoder || '';
   if (s.status !== 'ready') return setTimeout(poll, 1200);
   const m = await fetch('/api/tags-meta').then(r => r.json());
-  MOOD = m.mood; SOUND = m.sound;
+  MOOD = m.mood; SOUND = m.sound; GAMES = m.game || [];
   modelInfo = await fetch('/api/model-info').then(r => r.json());
 }
 poll();
@@ -158,11 +158,12 @@ async function scan() {
   if (!folder) return;
   const d = await fetch('/api/scan', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({folder, recursive: $('recursive').checked,
+    body: JSON.stringify({folder, library: libraryRoot(), recursive: $('recursive').checked,
                           only_untagged: $('onlyuntagged').checked})
   }).then(r => r.json());
   if (d.error) return alert(d.error);
-  files = d.files.map(f => ({...f, res: null, selected: null, primary: null, status: 'pending'}));
+  files = d.files.map(f => ({...f, res: null, selected: null, primary: null,
+                             gamePick: f.game || f.game_guess || '', status: 'pending'}));
   cur = -1;
   renderList(); renderDetail(); updateCounts();
   loadMoodFolders();
@@ -260,7 +261,7 @@ function renderDetail() {
 
   if (f.status === 'err') body += `<p class="err">${esc(f.error || 'failed')}</p>`;
   else if (!f.res) body += `<p class="empty">Analyzing…</p>`;
-  else body += primaryPicker(f) + group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
+  else body += gamePicker(f) + primaryPicker(f) + group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
     <div style="margin-top:18px;display:flex;gap:8px">
       <button class="primary" onclick="save()">Save tags</button>
       <button onclick="reset()">Reset to suggestions</button>
@@ -298,6 +299,36 @@ function primaryPicker(f) {
 
 function setPrimary(t) { files[cur].primary = t; renderDetail(); }
 
+// Game is read off the filename or its folder, never predicted from audio —
+// two Mario Galaxy tracks sound nothing alike. A tag already on the file wins.
+function gamePicker(f) {
+  if (f.game)
+    return `<h2>Game</h2><div class="fpath">${esc(f.game)} — already tagged, left as is.</div>`;
+
+  const isNew = f.game_is_new && f.gamePick === f.game_guess;
+  const known = GAMES.includes(f.gamePick);
+  let opts = '<option value="">(none)</option>';
+  if (f.gamePick && !known)
+    opts += `<option value="${esc(f.gamePick)}" selected>${esc(f.gamePick)} (new tag)</option>`;
+  opts += GAMES.map(g => `<option value="${g}" ${g===f.gamePick?'selected':''}>${g}</option>`).join('');
+
+  const note = !f.game_guess ? 'no game name in the filename or folder'
+             : `read from the ${esc(f.game_guess_from)}`;
+  const warn = isNew
+    ? `<div class="fpath" style="color:var(--warn);margin-top:6px">Not in your tag library yet — saving adds it. Edit the box if the name is off.</div>`
+    : '';
+  return `<h2>Game</h2>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <select onchange="setGame(this.value)"
+        style="font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;max-width:260px">${opts}</select>
+      <input type="text" value="${esc(f.gamePick || '')}" placeholder="or type one"
+        onchange="setGame(this.value)" style="max-width:220px">
+      <span class="fpath" style="margin:0">${note}</span>
+    </div>${warn}`;
+}
+
+function setGame(g) { files[cur].gamePick = g; renderDetail(); renderList(); }
+
 function group(title, tags, f) {
   const rows = tags.map(t => {
     const s = f.res.scores[t];
@@ -333,10 +364,13 @@ function clearAll() { files[cur].selected = new Set(); renderDetail(); renderLis
 async function saveFile(f) {
   const d = await fetch('/api/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({path: f.path, tags: [...f.selected]})
+    body: JSON.stringify({path: f.path, tags: [...f.selected],
+                          game: f.game ? null : (f.gamePick || null),
+                          allow_new_game: true})
   }).then(r => r.json());
   if (d.error) { alert(d.error); return false; }
   f.existing_tags = [...f.selected];
+  if (!f.game && f.gamePick) f.game = f.gamePick;
   f.status = 'saved';
   return true;
 }
