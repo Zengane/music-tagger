@@ -17,14 +17,16 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return np.divide(v, n, out=np.zeros_like(v), where=n > 0)
 
 
-def mean_half(X: np.ndarray) -> np.ndarray:
-    """Recover the mean-pooled half of a mean+std embedding, renormalised.
+def text_block(X: np.ndarray, sl: tuple[int, int] | None) -> np.ndarray:
+    """Pull out the columns that share a space with the encoder's text tower.
 
-    Only that half lives in the encoder's shared audio/text space, so zero-shot
-    similarity has to be computed against it rather than the full vector.
+    For a single encoder that's the mean-pooled half; for a fusion it's the mean
+    block of whichever part has a text tower, which sits partway into the concat.
+    The slice is renormalised because the full vector was normalised as a whole.
     """
-    d = X.shape[-1] // 2
-    return _unit(X[..., :d])
+    if sl is None:
+        return np.zeros_like(X[..., :1])
+    return _unit(X[..., sl[0]:sl[1]])
 
 
 class Tagger:
@@ -33,6 +35,11 @@ class Tagger:
         self.probes = probes            # tag -> {coef, intercept, threshold, cv_*}
         self.zeroshot = zeroshot        # tag -> {text_vec, threshold, prevalence}
         self.meta = meta
+
+    @property
+    def text_slice(self):
+        sl = self.meta.get("text_slice")
+        return tuple(sl) if sl else None
 
     # ---- persistence ----------------------------------------------------
     def save(self, path=MODEL_PATH):
@@ -59,7 +66,7 @@ class Tagger:
     def score(self, x: np.ndarray) -> dict[str, dict]:
         """One track embedding -> per-tag score, threshold and provenance."""
         out = {}
-        xm = mean_half(x)
+        xm = text_block(x, self.text_slice)
         for tag in ALL_TAGS:
             if tag in self.probes:
                 m = self.probes[tag]
@@ -107,11 +114,12 @@ def build_zeroshot(encoder, X_library: np.ndarray, Y: np.ndarray, tags: list[str
     Over-firing is the right bias here: these are rare tags the user will be
     reviewing by hand anyway, and a suggestion they can reject beats silence.
     """
-    text = encoder.embed_text([PROMPTS[t] for t in tags])
+    sl = encoder.text_slice(X_library.shape[1])
+    text = encoder.embed_text([PROMPTS[t] for t in tags]) if sl else None
     if text is None:
         return {}
     text = _unit(np.asarray(text, dtype=np.float32))
-    Xm = mean_half(X_library)
+    Xm = text_block(X_library, sl)
 
     heads = {}
     for i, tag in enumerate(tags):

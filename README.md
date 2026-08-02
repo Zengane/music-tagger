@@ -117,7 +117,7 @@ venv\Scripts\python.exe bakeoff.py "H:\Media Browser\Mega Music Pack"
 Train the tagger with the winning encoder:
 
 ```bash
-venv\Scripts\python.exe train.py "H:\Media Browser\Mega Music Pack" --encoder muq-mulan
+venv\Scripts\python.exe train.py "H:\Media Browser\Mega Music Pack" --encoder fusion
 ```
 
 Review and write tags:
@@ -134,10 +134,33 @@ in a sidecar, so hitting **Retrain** afterwards makes the next batch better.
 
 | name | model | text tower | notes |
 |---|---|---|---|
+| `fusion` | muq-mulan + muq + clap-music | yes | **default**, the three concatenated |
 | `muq-mulan` | `OpenMuQ/MuQ-MuLan-large` | yes | music-text contrastive, 79.3 ROC-AUC zero-shot on MagnaTagATune |
 | `muq` | `OpenMuQ/MuQ-large-msd-iter` | no | music SSL, probe only |
 | `mert` | `m-a-p/MERT-v1-330M` | no | music SSL, probe only |
 | `clap-music` | `laion/larger_clap_music_and_speech` | yes | what v1 used, wired up correctly this time |
+
+Scored on the library's own 857 labelled tracks:
+
+| encoder | dim | macro AP | macro AUC | precision | recall |
+|---|---|---|---|---|---|
+| **fusion** | 4096 | **0.591** | 0.917 | 0.51 | 0.74 |
+| muq-mulan | 1024 | 0.559 | 0.909 | 0.48 | 0.73 |
+| clap-music | 1024 | 0.526 | 0.893 | 0.44 | 0.73 |
+| muq | 2048 | 0.521 | 0.889 | 0.44 | 0.71 |
+| mert | 2048 | 0.445 | 0.871 | 0.40 | 0.69 |
+
+No single encoder wins everywhere, which is why the default is all three at once.
+MuQ-MuLan takes most tags; MuQ is better at Fantasy, Ambient and Medieval;
+CLAP-music is much better at Chiptuney. Fusing them moves Fantasy +0.16,
+Medieval +0.13 and Chiptuney +0.13 over MuQ-MuLan alone.
+
+MERT is left out of the fusion on purpose: adding it was worth +0.003 macro AP
+for another 2048 dimensions and another pass over every file.
+
+Zero-shot fallback reads the text-aligned part's mean block specifically — for
+the fusion that's columns 0:512, MuQ-MuLan's half, not the first half of the
+concatenation.
 
 MuQ weights are CC-BY-NC 4.0 — fine for a personal library, not for a product.
 

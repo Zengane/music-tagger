@@ -35,9 +35,20 @@ class Encoder:
     window_s: float
     max_windows: int
     batch: int = 8
+    has_text: bool = False          # whether embed_text() returns anything
+    caches_internally: bool = False  # set when the encoder manages its own cache
 
     def load(self) -> None:
         raise NotImplementedError
+
+    def text_slice(self, total_dim: int) -> tuple[int, int] | None:
+        """Which columns of a track embedding share a space with `embed_text`.
+
+        Zero-shot fallback compares a track against a tag's text embedding, so it
+        needs the mean-pooled block specifically — the std block, and any other
+        encoder's columns in a fusion, are not in that space.
+        """
+        return (0, total_dim // 2) if self.has_text else None
 
     def embed_windows(self, wavs: torch.Tensor) -> np.ndarray:
         """(n, samples) float32 on device -> (n, d) numpy."""
@@ -61,6 +72,7 @@ class MuQMuLanEncoder(Encoder):
     """Contrastive music-text model. Also gives us a zero-shot path for rare tags."""
 
     name = "muq-mulan"
+    has_text = True
     sr = 24000
     window_s = 20.0
     max_windows = 12
@@ -133,6 +145,7 @@ class ClapMusicEncoder(Encoder):
     respected explicitly and windows tile the whole track."""
 
     name = "clap-music"
+    has_text = True
     sr = 48000
     window_s = 10.0
     max_windows = 12
@@ -164,6 +177,82 @@ class ClapMusicEncoder(Encoder):
             return self.model.get_text_features(**inp).pooler_output.float().cpu().numpy()
 
 
+class FusionEncoder(Encoder):
+    """Several encoders concatenated.
+
+    The bakeoff showed no single encoder wins everywhere: MuQ-MuLan takes most
+    tags, MuQ is better at Fantasy, Ambient and Medieval, and CLAP-music is much
+    better at Chiptuney. Concatenating lets each probe draw on whichever
+    representation actually separates its tag — worth +0.03 macro AP over
+    MuQ-MuLan alone, and +0.03 precision at the same recall.
+
+    MERT is deliberately absent: it added 0.003 AP for another 2048 dimensions
+    and another pass over every file.
+
+    Each part keeps its own embedding cache, so switching between a single
+    encoder and a fusion never re-embeds anything, and a part whose vectors are
+    all cached is never even loaded onto the GPU.
+    """
+
+    name = "fusion"
+    PARTS = ("muq-mulan", "muq", "clap-music")
+    caches_internally = True   # parts are cached individually; skip the outer cache
+
+    def __init__(self, parts: tuple[str, ...] = PARTS):
+        self.part_names = tuple(parts)
+        self.parts: dict[str, Encoder] = {n: ENCODERS[n]() for n in self.part_names}
+        self.part_dims: dict[str, int] = {}
+        self._caches: dict[str, object] = {}
+        self._loaded: set[str] = set()
+
+    @property
+    def has_text(self) -> bool:
+        return any(p.has_text for p in self.parts.values())
+
+    def load(self) -> None:
+        """No-op: parts load on first use, so a fully cached run stays off the GPU."""
+
+    def _part(self, name: str) -> Encoder:
+        if name not in self._loaded:
+            self.parts[name].load()
+            self._loaded.add(name)
+        return self.parts[name]
+
+    def embed_part(self, name: str, filepath) -> np.ndarray:
+        from .dataset import EmbeddingCache
+
+        cache = self._caches.setdefault(name, EmbeddingCache(name))
+        vec = cache.get(filepath)
+        if vec is None:
+            vec = self._part(name).embed_file(filepath)
+            cache.put(filepath, vec)
+        self.part_dims[name] = vec.shape[0]
+        return vec
+
+    def embed_file(self, filepath) -> np.ndarray:
+        vec = np.concatenate([self.embed_part(n, filepath) for n in self.part_names])
+        norm = np.linalg.norm(vec)
+        return vec / norm if norm > 0 else vec
+
+    def text_slice(self, total_dim: int) -> tuple[int, int] | None:
+        """The mean block of the first text-capable part, located in the concat."""
+        if not self.part_dims:
+            raise RuntimeError("embed a file before asking for the text slice")
+        offset = 0
+        for n in self.part_names:
+            d = self.part_dims[n]
+            if self.parts[n].has_text:
+                return (offset, offset + d // 2)
+            offset += d
+        return None
+
+    def embed_text(self, texts):
+        for n in self.part_names:
+            if self.parts[n].has_text:
+                return self._part(n).embed_text(texts)
+        return None
+
+
 ENCODERS = {
     e.name: e
     for e in (MuQMuLanEncoder, MuQEncoder, MertEncoder, ClapMusicEncoder)
@@ -171,8 +260,12 @@ ENCODERS = {
 
 
 def get_encoder(name: str) -> Encoder:
+    if name == FusionEncoder.name:
+        enc = FusionEncoder()
+        enc.load()
+        return enc
     if name not in ENCODERS:
-        raise KeyError(f"unknown encoder {name!r}; have {sorted(ENCODERS)}")
+        raise KeyError(f"unknown encoder {name!r}; have {sorted(ENCODERS) + ['fusion']}")
     enc = ENCODERS[name]()
     enc.load()
     return enc

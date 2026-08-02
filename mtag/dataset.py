@@ -97,11 +97,13 @@ def collect_untagged(root, exclude_dirs=("SFX",)) -> list[Path]:
 def embed_all(encoder, paths: list[Path], progress=None) -> tuple[np.ndarray, list[Path]]:
     """Embed `paths`, using and filling the cache. Files that fail to decode are
     dropped and reported; returns (X, kept_paths)."""
-    cache = EmbeddingCache(encoder.name)
+    # A fusion encoder caches each part separately, so an outer cache would only
+    # duplicate what its parts already hold.
+    cache = None if getattr(encoder, "caches_internally", False) else EmbeddingCache(encoder.name)
     vecs, kept, failed = [], [], []
 
     for i, p in enumerate(paths):
-        vec = cache.get(p)
+        vec = cache.get(p) if cache else None
         if vec is None:
             try:
                 vec = encoder.embed_file(p)
@@ -110,7 +112,8 @@ def embed_all(encoder, paths: list[Path], progress=None) -> tuple[np.ndarray, li
                 if progress:
                     progress(i + 1, len(paths), p, error=str(e))
                 continue
-            cache.put(p, vec)
+            if cache:
+                cache.put(p, vec)
         vecs.append(vec)
         kept.append(p)
         if progress:

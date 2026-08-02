@@ -55,6 +55,7 @@ def train(library: str, encoder_name: str, out=MODEL_PATH) -> Tagger:
         meta={
             "n_train": int(X.shape[0]),
             "dim": int(X.shape[1]),
+            "text_slice": enc.text_slice(X.shape[1]),
             "summary": s,
             "library": str(library),
         },
@@ -82,7 +83,7 @@ def train(library: str, encoder_name: str, out=MODEL_PATH) -> Tagger:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("library")
-    ap.add_argument("--encoder", default="muq-mulan")
+    ap.add_argument("--encoder", default="fusion")
     args = ap.parse_args()
     train(args.library, args.encoder)
 

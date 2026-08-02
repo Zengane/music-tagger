@@ -225,6 +225,34 @@ def test_taxonomy_matches_library():
           "no rating, emoji or Game tag is in the tagger's vocabulary")
 
 
+def test_fusion_text_slice():
+    print("fusion text slice")
+    from mtag.encoders import FusionEncoder
+    from mtag.model import text_block
+
+    f = FusionEncoder()
+    check(f.part_names == ("muq-mulan", "muq", "clap-music"), "MERT is excluded from the fusion")
+    check(f.has_text, "fusion reports a text tower")
+
+    # Zero-shot must read the text-aligned part's mean block, not the first
+    # half of the concatenation — those are different once parts are stacked.
+    f.part_dims = {"muq-mulan": 1024, "muq": 2048, "clap-music": 1024}
+    check(f.text_slice(4096) == (0, 512), "slice is MuQ-MuLan's mean block, not (0, 2048)")
+
+    g = FusionEncoder(parts=("muq", "muq-mulan"))
+    g.part_dims = {"muq": 2048, "muq-mulan": 1024}
+    check(g.text_slice(3072) == (2048, 2560), "slice follows the part's offset in the concat")
+
+    h = FusionEncoder(parts=("muq",))
+    h.part_dims = {"muq": 2048}
+    check(h.text_slice(2048) is None, "a fusion with no text tower has no slice")
+
+    X = np.tile(np.arange(4096, dtype=np.float32), (3, 1))
+    blk = text_block(X, (0, 512))
+    check(blk.shape == (3, 512), "text_block returns just those columns")
+    check(np.allclose(np.linalg.norm(blk, axis=1), 1.0), "text_block renormalises")
+
+
 def test_ffmpeg():
     print("environment")
     ok = subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode == 0
@@ -235,7 +263,7 @@ def test_ffmpeg():
 
 if __name__ == "__main__":
     for t in (test_ffmpeg, test_sidecar, test_taxonomy_matches_library,
-              test_windows, test_organize, test_probes):
+              test_windows, test_organize, test_fusion_text_slice, test_probes):
         t()
     print()
     if _failures:
