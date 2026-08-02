@@ -127,15 +127,19 @@ GAME_TAGS = [
     "Command-and-Conquer", "Deus-Ex", "Donkey-Kong-Country-Returns", "Fantavision",
     "Fire-Emblem", "Genshin", "Gravity-Rush", "Homestuck-Hiveswap",
     "Jet-Set-Radio-or-Bomb-Rush-Cyberfunk", "Mario-Galaxy", "Mario-Odyssey", "Misc",
-    "Mount-&-Blade", "N64-Zelda", "Need-For-Speed", "Octodad", "Penny's-Big-Breakaway",
+    # "Penny-Big-Breakaway", not the tag library's "Penny's-Big-Breakaway":
+    # TagSpaces wouldn't match the tag with the apostrophe, so it was renamed.
+    # All 44 files use this spelling and none use the library's.
+    "Mount-&-Blade", "N64-Zelda", "Need-For-Speed", "Octodad", "Penny-Big-Breakaway",
     "Pikuniku", "Pokemon-Channel", "Rabbids-Go-Home", "Ridge-Racer", "SMT4", "Sims",
     "Sonic-Mania", "Splatoon", "TMNT", "Tekken", "Undertale-Deltarune", "Warhammer",
     "Wii-Music", "Wizard-of-Legend", "Xenoblade",
 ]
 
-# Game tags in sidecars that predate a rename in the tag library.
+# Game tags that have been superseded. Penny goes the other way from the tag
+# library on purpose — see the note in GAME_TAGS.
 GAME_ALIASES = {
-    "Penny-Big-Breakaway": "Penny's-Big-Breakaway",
+    "Penny's-Big-Breakaway": "Penny-Big-Breakaway",
     "Jet-Set-Radio": "Jet-Set-Radio-or-Bomb-Rush-Cyberfunk",
 }
 
@@ -172,8 +176,8 @@ GAME_PHRASES = {
     "N64-Zelda": ["ocarina of time", "majora's mask", "majoras mask"],
     "Need-For-Speed": ["need for speed", "hot pursuit"],
     "Octodad": ["octodad"],
-    "Penny's-Big-Breakaway": ["penny's big breakaway", "pennys big breakaway",
-                              "penny big breakaway"],
+    "Penny-Big-Breakaway": ["penny's big breakaway", "pennys big breakaway",
+                            "penny big breakaway"],
     "Pikuniku": ["pikuniku"],
     "Pokemon-Channel": ["pokemon channel", "pokémon channel"],
     "Rabbids-Go-Home": ["rabbids go home", "rabbids"],

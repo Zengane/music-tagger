@@ -224,6 +224,14 @@ def test_taxonomy_matches_library():
     check(not (others & set(ALL_TAGS)),
           "no rating, emoji or Game tag is in the tagger's vocabulary")
 
+    # Game tags may differ from the library where a name was renamed by hand;
+    # every such difference has to be spelled out in GAME_ALIASES.
+    from mtag.taxonomy import GAME_ALIASES, GAME_TAGS
+    lib_games = set(groups.get("Game", []))
+    unexplained = (lib_games - set(GAME_TAGS)) - set(GAME_ALIASES)
+    check(not unexplained, f"every library game tag is known or aliased ({unexplained or 'none left over'})")
+    check(set(GAME_ALIASES.values()) <= set(GAME_TAGS), "aliases resolve to real game tags")
+
 
 def test_skipping():
     print("skipping renders and SFX")
@@ -255,6 +263,7 @@ def test_skipping():
 
 def test_tag_aliases():
     print("tag aliases")
+    from mtag import gametag
     tmp = Path(tempfile.mkdtemp())
     try:
         f = tmp / "song.mp3"
@@ -262,14 +271,19 @@ def test_tag_aliases():
         (tmp / ".ts").mkdir()
         (tmp / ".ts" / "song.mp3.json").write_text(json.dumps({"tags": [
             {"title": "Jazz"}, {"title": "Bombastic"}, {"title": "Sims"},
-            {"title": "Penny-Big-Breakaway"},
+            {"title": "Jet-Set-Radio"},
         ]}), encoding="utf-8-sig")
 
         # The bug this fixes: "Jazz" isn't in the library, so the file read as
         # untagged and never trained.
         check(read_taxonomy_tags(f) == ["Jazzy", "Bombastic-Heavy"],
               "misspelled Mood/Sound tags resolve to real ones")
-        check("Penny's-Big-Breakaway" in read_tags(f), "renamed game tags resolve too")
+        check("Jet-Set-Radio-or-Bomb-Rush-Cyberfunk" in read_tags(f),
+              "renamed game tags resolve too")
+        # The apostrophe form is the stale one here: TagSpaces wouldn't match it,
+        # so all 44 files use "Penny-Big-Breakaway" and the library's entry doesn't.
+        check(gametag.canonical("Penny's-Big-Breakaway") == "Penny-Big-Breakaway",
+              "the apostrophe-free Penny spelling is canonical")
         check("Jazz" in read_tags(f, raw=True), "raw=True still shows what's on disk")
 
         write_tags(f, ["Jazzy", "Chill"])
@@ -334,6 +348,31 @@ def test_gametag():
               f"an unknown game is proposed from its folder (got {tag!r}, new={is_new})")
         check(gametag.detect(unknown, lib) is None,
               "detect() stays limited to known tags")
+
+        # The drop folder names the game; the subfolder a track sits in doesn't.
+        bside = lib / "Untagged" / "Wario World" / "B Side"
+        bside.mkdir(parents=True)
+        t2 = bside / "03 Greenhorn Forest.mp3"
+        t2.write_bytes(b"x")
+        tag, src, is_new = gametag.detect_detail(t2, lib)
+        check(tag == "Wario-World", f"the outermost folder names it, not 'B Side' (got {tag!r})")
+
+        # A folder name outranks the filename, since a drop is named per game.
+        conflict = lib / "Untagged" / "Pikuniku"
+        conflict.mkdir(parents=True)
+        t3 = conflict / "Super Mario Galaxy style remix.mp3"
+        t3.write_bytes(b"x")
+        check(gametag.detect(t3, lib) == "Pikuniku",
+              "a known folder beats a known filename")
+
+        # ...but a known filename still beats a *guessed* folder name, so a
+        # compilation folder doesn't swallow the tracks inside it.
+        comp = lib / "Untagged" / "JimmyHere music"
+        comp.mkdir(parents=True)
+        t4 = comp / "Super Mario Galaxy - Gusty Garden.mp3"
+        t4.write_bytes(b"x")
+        check(gametag.detect(t4, lib) == "Mario-Galaxy",
+              "a known filename beats an unknown folder")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -346,6 +385,8 @@ def test_gametag():
         ("VA-11 Hall-A", "VA-11-Hall-A"),
         ("TF2", "TF2"),
         ("OST", None),
+        # No apostrophes: TagSpaces wouldn't match "Penny's-Big-Breakaway".
+        ("Penny's Big Breakaway OST", "Pennys-Big-Breakaway"),
     ]:
         got = gametag.tag_from_folder(folder)
         check(got == want, f"{folder!r} -> {got!r}")

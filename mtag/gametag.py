@@ -80,10 +80,13 @@ def tag_from_folder(name: str) -> str | None:
         "VA-11 Hall-A"                    -> "VA-11-Hall-A"
 
     Capitalisation the user typed is kept, since "TF2" and "VA-11" shouldn't be
-    reflowed. Returns None when nothing but boilerplate is left.
+    reflowed. Apostrophes are dropped: TagSpaces wouldn't match the tag for
+    "Penny's Big Breakaway", which is why it got renamed by hand.
+
+    Returns None when nothing but boilerplate is left.
     """
     tokens = []
-    for tok in _BRACKETED.sub(" ", name).split():
+    for tok in _BRACKETED.sub(" ", name).replace("'", "").replace("’", "").split():
         if re.sub(r"\W", "", tok).lower() in _NOISE_WORDS:
             continue
         tokens.append(tok.capitalize() if tok.islower() else tok)
@@ -111,35 +114,53 @@ def _folder_chain(p: Path, root: Path | None):
             return  # with no root to stop at, don't wander up the whole drive
 
 
+def album_root(filepath, library_root=None) -> Path | None:
+    """The folder that names the drop, not the subfolder a track sits in.
+
+    New music arrives as "Untagged/Bayonetta/DISC 3/07 Battle.mp3" or
+    "Untagged/A Hat in Time/B Side/01 Main Theme.mp3", so the *outermost*
+    folder below the staging area is the one holding the game name — the
+    innermost is "DISC 3" or "B Side".
+    """
+    chain = list(_folder_chain(Path(filepath).resolve(),
+                               Path(library_root).resolve() if library_root else None))
+    return chain[-1] if chain else None
+
+
 def detect_detail(filepath, library_root=None) -> tuple[str | None, str | None, bool]:
     """Best guess at the game, where it came from, and whether it's a new tag.
 
-    The filename is checked first, then each folder between the file and the
-    library root — "01 Main Theme" inside "A Hat in Time OST/" still resolves.
-    Mood folders and staging folders like "Untagged" are stepped over.
+    Folders are consulted before the filename: a drop is named after its game,
+    and that beats whatever a track happens to be called. Mood folders, staging
+    folders like "Untagged" and per-disc subfolders are stepped over.
 
-    When nothing in the known list matches, the containing folder is offered as
-    a *new* tag: most of a fresh drop is games the tag library hasn't heard of
-    yet, and "Bayonetta/" names itself. Those come back with is_new=True and are
-    never written without being confirmed.
+    The filename is still the fallback, because the existing library is filed by
+    mood — "Adventure/Penny's Big Breakaway - ... .mp3" has no game folder to
+    read. A *known* game found in a filename also outranks a new name guessed
+    off a folder, so a compilation folder like "JimmyHere music/" doesn't
+    swallow the Mario Galaxy tracks inside it.
+
+    Anything not in the known list comes back with is_new=True and is never
+    written without being confirmed.
     """
     p = Path(filepath).resolve()
     root = Path(library_root).resolve() if library_root else None
-
-    hit = from_text(p.stem)
-    if hit:
-        return hit, "filename", False
-
     chain = list(_folder_chain(p, root))
+
     for parent in chain:
         hit = from_text(parent.name)
         if hit:
             return hit, f"folder {parent.name!r}", False
 
-    for parent in chain:
-        candidate = tag_from_folder(parent.name)
+    hit = from_text(p.stem)
+    if hit:
+        return hit, "filename", False
+
+    if chain:
+        outermost = chain[-1]
+        candidate = tag_from_folder(outermost.name)
         if candidate:
-            return candidate, f"folder {parent.name!r}", True
+            return candidate, f"folder {outermost.name!r}", True
     return None, None, False
 
 
