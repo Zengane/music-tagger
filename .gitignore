@@ -1,6 +1,16 @@
 venv/
 cache/
+libraries.json
+tag_library.json
 model/
 results/
 __pycache__/
 *.pyc
+build/
+*.spec
+
+# Built by build.bat. ui/taxonomy.odin is generated too, but it is committed so
+# the front end still builds on a machine without the Python environment.
+MusicTagger.exe
+mtag-test.exe
+dist/

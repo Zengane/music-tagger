@@ -50,6 +50,18 @@ SOUND_TAGS = [
 
 ALL_TAGS = MOOD_TAGS + SOUND_TAGS
 
+# Sound effects use a different vocabulary from music. These are deliberately
+# broad production categories: they describe how an editor will reach for an
+# effect, not what the recording is "about". They are manual labels for now;
+# the music model must never be trained on them or asked to predict them.
+SFX_TAGS = [
+    "Ambience", "Creature", "Foley", "Footstep", "Impact", "Interface",
+    "Magic", "Mechanical", "Nature", "One-Shot", "Loop", "Transition",
+    "Vehicle", "Voice", "Weapon", "Whoosh",
+]
+
+LIBRARY_TAGS = ALL_TAGS + SFX_TAGS
+
 # Folder names in the library that don't match a tag title verbatim.
 FOLDER_ALIASES = {
     "Build up": "Build-Up",
@@ -118,6 +130,78 @@ PROMPTS = {
 
 AUDIO_EXTS = {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac", ".opus"}
 
+# Words that appear in sound-effect filenames, per SFX tag. Effects are named
+# after what they are far more reliably than music is — "door_creak_03.wav"
+# says everything — so the filename is the first guess and the editor only
+# corrects it. Longer phrases are tried first.
+#
+# This is not a model. It is a lookup, and it is meant to be edited: add the
+# words your own library actually uses.
+SFX_PHRASES = {
+    "Ambience": ["ambience", "ambient", "roomtone", "room tone", "atmo",
+                 "atmosphere", "background", "drone", "bed"],
+    "Creature": ["creature", "monster", "growl", "roar", "snarl", "beast",
+                 "dragon", "zombie", "animal", "dog", "cat", "bird"],
+    "Foley": ["foley", "cloth", "rustle", "handling", "grab", "pickup",
+              "paper", "coin", "keys", "fabric"],
+    "Footstep": ["footstep", "footsteps", "walk", "run ", "boot", "step_",
+                 "steps", "gravel", "concrete"],
+    "Impact": ["impact", "hit", "punch", "smash", "crash", "thud", "slam",
+               "break", "shatter", "explosion", "boom", "bang"],
+    "Interface": ["ui_", "ui ", "interface", "button", "click", "menu",
+                  "notification", "beep", "select", "confirm", "cancel",
+                  "error", "popup", "hover"],
+    "Magic": ["magic", "spell", "cast", "arcane", "enchant", "sparkle",
+              "shimmer", "power up", "powerup", "buff"],
+    "Mechanical": ["mechanic", "machine", "motor", "engine", "gear", "servo",
+                   "robot", "hydraulic", "clank", "metal"],
+    "Nature": ["nature", "wind", "rain", "thunder", "water", "river", "ocean",
+               "wave", "fire", "forest", "leaves", "storm"],
+    "One-Shot": ["oneshot", "one shot", "one-shot", "single", "hit_"],
+    "Loop": ["loop", "looping", "_lp", "cycle", "sustained"],
+    "Transition": ["transition", "riser", "downlifter", "uplifter", "sweep",
+                   "stinger", "swell", "build"],
+    "Vehicle": ["vehicle", "car", "truck", "engine rev", "tire", "skid",
+                "plane", "helicopter", "train", "boat"],
+    "Voice": ["voice", "vocal", "shout", "scream", "grunt", "laugh", "speech",
+              "dialogue", "vo_", "breath"],
+    "Weapon": ["weapon", "gun", "gunshot", "rifle", "pistol", "shot", "reload",
+               "sword", "blade", "slash", "bow", "arrow", "laser"],
+    "Whoosh": ["whoosh", "swoosh", "swish", "woosh", "pass by", "passby",
+               "flyby", "air"],
+}
+
+# What a menu sound is *for*, from its filename.
+#
+# This is the part no acoustic model can do: Confirm and Cancel are the same
+# sound and differ only in what the designer meant. Game audio nearly always
+# says so in the filename, so that is where it is read from.
+SFX_INTENT_PHRASES = {
+    "Confirm": ["confirm", "accept", "ok_", "_ok", "yes", "success", "approve",
+                "validate", "correct"],
+    "Cancel": ["cancel", "back", "decline", "dismiss", "escape", "_no_", "abort",
+               "reject"],
+    "Error": ["error", "deny", "denied", "fail", "invalid", "wrong", "buzz",
+              "negative", "forbidden", "blocked"],
+    "Notification": ["notification", "notify", "alert", "message", "ping",
+                     "popup", "toast", "chime"],
+    "Select": ["select", "choose", "cursor", "move", "navigate", "highlight",
+               "tick", "switch"],
+    "Hover": ["hover", "focus", "rollover", "over_"],
+    "Open": ["open", "expand", "appear", "show", "enter_", "unfold"],
+    "Close-UI": ["close", "collapse", "disappear", "hide", "exit_", "fold"],
+    "Purchase": ["purchase", "buy", "shop", "coin", "cash", "money", "sell",
+                 "transaction"],
+    "Unlock": ["unlock", "achievement", "reward", "complete", "unlocked"],
+    "Level-Up": ["levelup", "level up", "level_up", "upgrade", "rank up",
+                 "promote", "powerup", "power up"],
+    "Pickup": ["pickup", "pick up", "collect", "grab", "loot", "gather", "item"],
+    "Equip": ["equip", "unequip", "holster", "draw_", "sheath"],
+    "Save": ["save", "checkpoint", "autosave"],
+    "Page-Turn": ["page", "turn", "flip", "book", "scroll"],
+    "Typing": ["typing", "keyboard", "keypress", "type_", "letter"],
+}
+
 # ── Game tags ────────────────────────────────────────────────────────────────
 # Mirrors the Game group in the tag library. These are never predicted from
 # audio — they're read out of the filename or the folder it sits in.
@@ -126,7 +210,7 @@ GAME_TAGS = [
     "Balatro", "BattleBlock", "Blue-Archive", "Candy-Crush", "Celeste",
     "Command-and-Conquer", "Deus-Ex", "Donkey-Kong-Country-Returns", "Fantavision",
     "Fire-Emblem", "Genshin", "Gravity-Rush", "Homestuck-Hiveswap",
-    "Jet-Set-Radio-or-Bomb-Rush-Cyberfunk", "Mario-Galaxy", "Mario-Odyssey", "Misc",
+    "Jet-Set-Radio-or-Bomb-Rush-Cyberfunk", "Mario", "Mario-Galaxy", "Mario-Odyssey", "Misc",
     # "Penny-Big-Breakaway", not the tag library's "Penny's-Big-Breakaway":
     # TagSpaces wouldn't match the tag with the apostrophe, so it was renamed.
     # All 44 files use this spelling and none use the library's.
@@ -168,8 +252,18 @@ GAME_PHRASES = {
     "Homestuck-Hiveswap": ["hiveswap", "homestuck"],
     "Jet-Set-Radio-or-Bomb-Rush-Cyberfunk": ["jet set radio", "bomb rush cyberfunk",
                                              "jet set radio future"],
-    "Mario-Galaxy": ["super mario galaxy", "mario galaxy"],
-    "Mario-Odyssey": ["super mario odyssey", "mario odyssey"],
+    # One tag for the series, not one per instalment. A search for Mario music
+    # is a search for all of it, and splitting Galaxy from Odyssey from 64 put
+    # three files in three places for no gain. The two older tags still exist
+    # on files that carry them; renaming one onto "Mario" in the app merges
+    # them.
+    "Mario": [
+        "super mario galaxy", "mario galaxy",
+        "super mario odyssey", "mario odyssey",
+        "super mario sunshine", "mario sunshine",
+        "super mario world", "super mario bros", "super mario",
+        "mario kart", "paper mario", "mario",
+    ],
     "Mount-&-Blade": ["mount & blade", "mount and blade", "bannerlord"],
     # Deliberately not "legend of zelda": that also matches Breath of the Wild,
     # Twilight Princess and every other entry in the series.

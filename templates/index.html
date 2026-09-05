@@ -10,7 +10,7 @@
   --warn:#fbbf24; --bad:#f87171; --mood:#22c55e; --sound:#38bdf8;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
+body{margin:0;background:#0b0d11;color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;height:100vh;overflow:hidden}
 button{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
 button:hover:not(:disabled){border-color:var(--accent)}
 button:disabled{opacity:.4;cursor:not-allowed}
@@ -18,25 +18,46 @@ button.primary{background:var(--accent);color:#04121b;border-color:var(--accent)
 input[type=text]{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
 label.chk{display:inline-flex;align-items:center;gap:5px;color:var(--dim);cursor:pointer;user-select:none}
 
-header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#workspace{height:100vh;display:flex;background:#0b0d11}
+#sidebar{width:218px;flex:none;padding:15px 10px;background:#111318;border-right:1px solid #252a33;display:flex;flex-direction:column;gap:8px}
+#brand{padding:0 10px 15px;font-size:16px;font-weight:650;letter-spacing:.2px;border-bottom:1px solid var(--line)}
+#brand small{display:block;margin-top:3px;font-weight:400;color:var(--dim);font-size:11px}
+.side-label{margin:16px 10px 3px;color:#6f7888;font-size:10px;font-weight:700;letter-spacing:.8px}
+.side-item{width:100%;border:0;background:transparent;text-align:left;padding:8px 10px;color:#aeb6c3;border-radius:5px}
+.side-item:hover{background:#1b2029;color:#fff}.side-item.active{background:#063d77;color:#e6f5ff}
+.side-foot{margin-top:auto;padding:10px;color:#6f7888;font-size:11px;border-top:1px solid var(--line)}
+.library-link{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:transparent;text-align:left;padding:5px 10px;color:var(--dim);font-size:11px;cursor:pointer}.library-link:hover{color:var(--text);background:#1b2029}
+#work-area{min-width:0;flex:1;display:flex;flex-direction:column;min-height:0}
+#work-area{position:relative}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#171a20;border-bottom:1px solid #292e38;flex-wrap:wrap}
 h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px}
 .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
 .badge.ok{color:var(--good);border-color:#1d4d33}
 .badge.err{color:var(--bad);border-color:#5c2626}
 .spacer{flex:1}
 
-.bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:#13161c;border-bottom:1px solid #292e38;flex-wrap:wrap}
 .bar input[type=text]{flex:1;min-width:220px}
+[data-tagging-action]{display:none}
+.search-box{position:relative;display:flex;align-items:center;gap:5px;flex:1;min-width:300px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 6px}.search-box:focus-within{border-color:var(--accent)}.search-box #query{border:0;background:transparent;outline:0;min-width:100px;padding:4px;flex:1}.search-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:5px;background:#064b7e;color:#e8f7ff;font-size:11px;white-space:nowrap}.search-chip.or{background:#42506e}.search-chip.not{background:#632f38}.search-chip button{border:0;background:transparent;color:inherit;padding:0;line-height:1;cursor:pointer}
+#search-chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.tag-bar{display:flex;gap:12px;align-items:flex-start;padding:7px 16px;background:#10141a;border-bottom:1px solid #292e38;overflow-x:auto;min-height:42px}.tag-group{display:flex;gap:4px;align-items:center;white-space:nowrap}.tag-group-label{font-size:10px;color:var(--dim);text-transform:uppercase;margin-right:2px}.tag-filter{font-size:11px;padding:3px 7px;border-radius:12px}.tag-filter.favorite{color:#ffe08a;border-color:#80631b}
+#tag-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:5;display:none;max-height:220px;overflow-y:auto;background:#1b2028;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px #0008;min-width:240px}.tag-menu-item{display:block;width:100%;text-align:left;border:0;border-radius:0;background:transparent;padding:6px 10px;font-size:12px}.tag-menu-item:hover{background:#063d77}
+#tag-library{border-bottom:1px solid #292e38;background:#10141a;color:var(--text)}#tag-library summary{cursor:pointer;padding:7px 16px;color:#b7c0ce;font-size:12px}#tag-library summary .fpath{margin-left:8px}
+#tag-panel{display:none;position:fixed;z-index:10;right:0;top:58px;bottom:0;width:370px;max-width:90vw;background:#15191f;border-left:1px solid #394352;box-shadow:-12px 0 30px #0008;overflow-y:auto;padding:16px}.tag-panel-head{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding-bottom:12px}.tag-panel-head h2{margin:0;flex:1}.tag-panel-group{margin-top:16px}.tag-panel-group h3{margin:0 0 6px;color:#aeb7c5;font-size:11px;text-transform:uppercase;letter-spacing:.7px}.tag-panel-row{display:flex;align-items:center;gap:5px;margin:3px 0}.tag-panel-row .tag-filter{flex:1;text-align:left}.tag-edit,.tag-delete{padding:3px 7px;font-size:11px}.tag-delete{color:#fca5a5}.tag-add{display:flex;gap:6px;margin:12px 0}.tag-add input,.tag-add select{min-width:0;flex:1;font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:5px}
 
-main{flex:1;display:flex;min-height:0}
-#list{width:44%;min-width:320px;overflow-y:auto;border-right:1px solid var(--line)}
-#detail{flex:1;overflow-y:auto;padding:14px 18px}
+main{flex:1;display:flex;min-height:0;background:#0f1217}
+#list{width:100%;min-width:390px;overflow-y:auto;background:#13161b}
+#detail{max-width:980px;width:100%;margin:0 auto;overflow-y:auto;padding:22px 30px;background:#0f1217}
+#tagging-view{display:none;flex:1;min-height:0;overflow-y:auto;background:#0f1217}
 
-.row{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
-.row:hover{background:var(--panel)}
-.row.sel{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.list-head{display:grid;grid-template-columns:minmax(160px,1fr) minmax(180px,1.1fr) 48px;gap:12px;padding:8px 14px;color:#707a89;font-size:10px;font-weight:700;letter-spacing:.7px;border-bottom:1px solid #303642;background:#171b22;position:sticky;top:0;z-index:1}
+.row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(180px,1.1fr) 48px;gap:12px;align-items:center;padding:9px 14px;border-bottom:1px solid #222832;cursor:pointer}
+.row:hover{background:#1a1f27}.row.sel{background:#063d77;box-shadow:inset 3px 0 0 #5cc8ff}
 .row .nm{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row .sub{margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.drag-handle{color:var(--dim);cursor:grab;font-size:15px;padding:2px 6px;margin-right:3px}.drag-handle:active{cursor:grabbing}
+.row .sub{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.kind{font-size:10px;color:#7f8998;text-align:right;text-transform:uppercase;letter-spacing:.5px}
 .dot{width:7px;height:7px;border-radius:99px;flex:none;display:inline-block}
 .dot.pending{background:#4b5563}.dot.done{background:var(--good)}
 .dot.saved{background:var(--accent)}.dot.err{background:var(--bad)}
@@ -44,10 +65,26 @@ main{flex:1;display:flex;min-height:0}
 .chip{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
 .chip.mood{border-color:#276b41;color:#7ee2a8}
 .chip.sound{border-color:#1c556f;color:#7fd4f5}
+.chip.sfx{border-color:#66500f;color:#f8d477}
 .chip.old{border-style:dashed;opacity:.65}
 
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin:18px 0 8px;font-weight:600}
 audio{width:100%;margin-top:6px}
+.wave-wrap{margin-top:10px;background:#080a0d;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.wave-meta{display:flex;justify-content:space-between;padding:4px 8px;color:var(--dim);font-size:11px}
+.search-help{color:var(--dim);font-size:11px;white-space:nowrap}
+#graph-view{display:none;flex:1;min-height:0;padding:16px 20px;position:relative;background:#0f1217}
+#graph-canvas{width:100%;height:100%;min-height:300px;background:#0b0e12;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.graph-note{position:absolute;left:30px;top:22px;color:var(--dim);font-size:11px;pointer-events:none}
+#player-dock{flex:none;background:#15191f;border-top:1px solid #323945;padding:8px 14px 10px;display:grid;grid-template-columns:minmax(180px,260px) auto minmax(180px,1fr) auto;grid-template-rows:auto 68px;gap:6px 14px;align-items:center}
+#now-playing{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;font-weight:600}
+#now-meta{font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.transport{display:flex;align-items:center;gap:6px;grid-column:2;grid-row:1}
+.transport button{width:30px;height:30px;padding:0;border-radius:50%;font-size:13px}.transport #btn-play{width:38px;height:38px;background:#e9edf3;color:#101317;border-color:#e9edf3}
+#transport-wave{display:block;width:100%;height:68px;grid-column:1 / 5;grid-row:2;background:#090b0e;border:1px solid #2a3039;border-radius:5px;cursor:pointer}
+.player-tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;grid-column:4;grid-row:1;color:var(--dim);font-size:11px;white-space:nowrap}.player-tools input{accent-color:var(--accent)}
+#wave-zoom{width:100px}.time-readout{font-variant-numeric:tabular-nums;color:#b7c0ce;font-size:11px}
+#clip-drag{color:#d9f3ff;border:1px solid #2b6f8e;border-radius:4px;padding:3px 6px;cursor:grab}.selection-note{font-size:10px;color:var(--dim)}
 .fname{font-size:15px;font-weight:600;word-break:break-word}
 .fpath{font-size:11px;color:var(--dim);word-break:break-all;margin-top:2px}
 
@@ -84,6 +121,21 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
 </head>
 <body>
 
+<div id="workspace">
+<aside id="sidebar">
+  <div id="brand">Music Tagger<small>local sound library</small></div>
+  <div class="side-label">LIBRARY</div>
+  <button class="side-item active" onclick="showLibrary()">♫ Tracks &amp; sound effects</button>
+  <button class="side-item" onclick="showTagging()">✦ Tagging</button>
+  <button class="side-item" onclick="showNodeView()">⌘ Tag map</button>
+  <div class="side-label">IMPORTED LIBRARIES</div>
+  <div id="recent-libraries"><span class="side-foot">No imported folders yet</span></div>
+  <div class="side-label">WORKFLOW</div>
+  <button class="side-item" onclick="browse()">⌂ Choose folder</button>
+  <button class="side-item" onclick="scan()">↻ Scan library</button>
+  <div class="side-foot">Sidecar-compatible<br>Local-first · no cloud</div>
+</aside>
+<section id="work-area">
 <header>
   <h1>Music Tagger v2</h1>
   <span class="badge" id="b-status">starting…</span>
@@ -91,6 +143,9 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
   <span class="badge" id="b-device"></span>
   <span class="spacer"></span>
   <span class="badge" id="b-counts"></span>
+  <button onclick="showTagging()" id="btn-tagging">Tagging</button>
+  <button onclick="toggleTagPanel()" id="btn-tag-library">Tag library</button>
+  <button onclick="showNodeView()" id="btn-view">Node view</button>
   <button onclick="showModel()">Model</button>
   <button onclick="retrain()" id="btn-retrain">Retrain</button>
 </header>
@@ -100,14 +155,19 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
   <button onclick="browse()">Browse</button>
   <label class="chk"><input type="checkbox" id="recursive" checked> subfolders</label>
   <label class="chk"><input type="checkbox" id="onlyuntagged"> untagged only</label>
+  <label class="chk" title="Include the separate SFX taxonomy and manual tagging workflow">
+    <input type="checkbox" id="include-sfx"> include SFX</label>
   <button class="primary" onclick="scan()">Scan</button>
   <span class="spacer"></span>
-  <button onclick="analyzeAll()" id="btn-analyze">Analyze all</button>
-  <button onclick="saveAll()" id="btn-saveall">Save all analyzed</button>
+  <button onclick="analyzeAll()" id="btn-analyze" data-tagging-action>Analyze all</button>
+  <button onclick="saveAll()" id="btn-saveall" data-tagging-action>Save all analyzed</button>
 </div>
 <div class="bar">
   <span style="color:var(--dim)">Library root</span>
   <input type="text" id="library" placeholder="defaults to the scanned folder">
+  <span style="color:var(--dim);white-space:nowrap">Search index</span>
+  <div class="search-box" onclick="$('query').focus()"><div id="search-chips"></div><input type="text" id="query" placeholder="type a name or + to add a tag…" title="Fuzzy search; + requires a tag, | accepts one, - excludes one" oninput="onSearchInput(this)" onkeydown="searchKey(event)"><div id="tag-menu"></div></div>
+  <button onclick="scan()">Search</button>
   <label class="chk" title="File each track into a folder named after its primary mood tag">
     <input type="checkbox" id="organize"> move into mood folders on save</label>
 </div>
@@ -115,8 +175,33 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
 
 <main>
   <div id="list"><div class="empty">Pick a folder and hit Scan.</div></div>
-  <div id="detail"><div class="empty">No file selected.</div></div>
 </main>
+<section id="tagging-view"><div id="detail"><div class="empty">Select a file in the Library, then open Tagging.</div></div></section>
+<section id="graph-view">
+  <div class="graph-note">Shared major tags form clusters · click a node to inspect the file</div>
+  <canvas id="graph-canvas"></canvas>
+</section>
+<section id="player-dock">
+  <div><div id="now-playing">No track selected</div><div id="now-meta">Select a track to start playback</div></div>
+  <div class="transport">
+    <button onclick="previousTrack()" title="Previous">|◀</button>
+    <button id="btn-play" onclick="togglePlayback()" title="Play or pause">▶</button>
+    <button onclick="nextTrack()" title="Next">▶|</button>
+  </div>
+  <div class="time-readout" id="transport-time">0:00 / 0:00</div>
+  <div class="player-tools"><span id="selection-note" class="selection-note">Drag on waveform to select a clip</span><span id="clip-drag" draggable="true" hidden ondragstart="startClipDrag(event)">⠿ Drag selection to Premiere</span><span>Zoom</span><input id="wave-zoom" type="range" min="1" max="24" value="1" oninput="drawTransport()"><button onclick="cycleRate()" id="rate-btn">1×</button><input id="volume" type="range" min="0" max="100" value="85" oninput="setVolume(this.value)"></div>
+  <canvas id="transport-wave" title="Click to seek · drag to select a clip"></canvas>
+  <audio id="audio-engine" preload="auto"></audio>
+</section>
+</section>
+</div>
+<aside id="tag-panel">
+  <div class="tag-panel-head"><h2>Tag library</h2><button onclick="toggleTagPanel()">Close</button></div>
+  <p class="fpath">Click a tag to search it, or drag it onto a track for immediate tagging.</p>
+  <div class="tag-add"><input id="new-tag" placeholder="New tag"><select id="new-tag-group"></select><button class="primary" onclick="addLibraryTag()">Add</button></div>
+  <div id="tag-panel-groups"></div>
+</aside>
+<div id="tag-bar" style="display:none"></div>
 
 <dialog id="dlg">
   <div class="dlg-h" id="dlg-h">Model</div>
@@ -125,32 +210,52 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padd
 </dialog>
 
 <script>
-let files = [];       // {name, rel, path, existing_tags, other_tags, res, selected:Set, status}
+let files = [], allFiles = []; // filtered view + complete imported index
 let cur = -1;
-let MOOD = [], SOUND = [], GAMES = [], modelInfo = null;
+let MOOD = [], SOUND = [], SFX = [], GAMES = [], modelInfo = null, tagGroups = [];
 let moodFolders = {};   // mood tag -> existing folder name in the library
+let viewMode = 'library', graphNodes = [];
 const $ = id => document.getElementById(id);
 const dlg = $('dlg');
+const audioEngine = $('audio-engine');
+let playbackRate = 1, preloadAudio = null;
+let libraries = [], tagCatalog = [], searchChips = [], waveSelection = null, wavePointer = null, selectionClip = null;
 
 // ── boot ────────────────────────────────────────────────────────────────────
 async function poll() {
   const s = await fetch('/api/status').then(r => r.json());
   const b = $('b-status');
-  b.textContent = s.status === 'ready' ? 'ready' : (s.detail || s.status);
-  b.className = 'badge ' + (s.status === 'ready' ? 'ok' : (s.status === 'loading' ? '' : 'err'));
+  b.textContent = s.status === 'ready' ? 'tagger ready' : (s.detail || s.status);
+  b.className = 'badge ' + (s.status === 'ready' ? 'ok' : (s.status === 'idle' || s.status === 'loading' ? '' : 'err'));
   $('b-device').textContent = s.device || '';
   $('b-encoder').textContent = s.encoder || '';
-  if (s.status !== 'ready') return setTimeout(poll, 1200);
-  const m = await fetch('/api/tags-meta').then(r => r.json());
-  MOOD = m.mood; SOUND = m.sound; GAMES = m.game || [];
-  modelInfo = await fetch('/api/model-info').then(r => r.json());
+  if (!MOOD.length) {
+    const m = await fetch('/api/tags-meta').then(r => r.json());
+    MOOD = m.mood; SOUND = m.sound; SFX = m.sfx || []; GAMES = m.game || [];
+    renderTagBar();
+  }
+  if (s.status === 'ready' && !modelInfo)
+    modelInfo = await fetch('/api/model-info').then(r => r.json());
+  setTimeout(poll, s.status === 'loading' ? 600 : 4000);
 }
 poll();
+loadLibraries();
+loadTagLibrary();
 
 // ── folder + scan ───────────────────────────────────────────────────────────
 async function browse() {
-  const d = await fetch('/api/browse').then(r => r.json());
-  if (d.path) { $('folder').value = d.path; scan(); }
+  let path = '';
+  try {
+    if (window.pywebview?.api?.choose_folder) path = await window.pywebview.api.choose_folder();
+    else {
+      const d = await fetch('/api/browse').then(r => r.json());
+      path = d.path || '';
+    }
+  } catch (e) {
+    alert('Folder picker failed: ' + (e?.message || e));
+    return;
+  }
+  if (path) { $('folder').value = path; scan(); }
 }
 
 async function scan() {
@@ -159,14 +264,162 @@ async function scan() {
   const d = await fetch('/api/scan', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({folder, library: libraryRoot(), recursive: $('recursive').checked,
-                          only_untagged: $('onlyuntagged').checked})
+                          only_untagged: $('onlyuntagged').checked,
+                          include_sfx: $('include-sfx').checked,
+                          query: ''})
   }).then(r => r.json());
   if (d.error) return alert(d.error);
-  files = d.files.map(f => ({...f, res: null, selected: null, primary: null,
+  allFiles = d.files.map(f => ({...f, res: null, selected: null, primary: null,
                              gamePick: f.game || f.game_guess || '', status: 'pending'}));
+  files = allFiles;
+  tagCatalog = d.tags || [];
   cur = -1;
-  renderList(); renderDetail(); updateCounts();
+  renderTagBar(); applyLocalSearch(); renderDetail(); updateCounts();
   loadMoodFolders();
+  loadLibraries();
+}
+
+function renderTagBar() {
+  const known = new Set([...MOOD, ...SOUND, ...SFX, ...GAMES]);
+  const groups = [['Mood', MOOD], ['Sound', SOUND], ['SFX', SFX], ['Game', GAMES],
+                  ['TagSpaces', tagCatalog.filter(t => !known.has(t))]];
+  $('tag-bar').innerHTML = groups.filter(([, tags]) => tags.length).map(([name, tags]) =>
+    `<div class="tag-group"><span class="tag-group-label">${name}</span>${[...new Set(tags)].sort((a,b)=>a.localeCompare(b)).map(t =>
+      `<button class="tag-filter ${['⭐','★','🌟','☆'].includes(t) ? 'favorite' : ''}" draggable="true" ondragstart='startTagDrag(event, ${JSON.stringify(t)})' onclick='chooseTag(${JSON.stringify(t)})'>${esc(t)}</button>`).join('')}</div>`).join('');
+}
+
+function availableTags() {
+  return [...new Set([...MOOD, ...SOUND, ...SFX, ...GAMES, ...tagCatalog, ...tagGroups.flatMap(g => g.tags)])];
+}
+
+function fuzzyText(needle, haystack) {
+  needle = needle.toLocaleLowerCase(); haystack = haystack.toLocaleLowerCase();
+  if (!needle) return true;
+  if (haystack.includes(needle)) return true;
+  let n = 0;
+  for (const c of haystack) if (c === needle[n]) n++;
+  return n === needle.length;
+}
+
+function localSearchMatch(f, query) {
+  const tokens = query.match(/(?:"[^"]+"|\S+)/g) || [];
+  const tags = f.all_tags || [...new Set([...(f.existing_tags || []), ...(f.sfx_tags || [])])];
+  const tagText = tags.map(String);
+  const text = [f.name, f.rel, f.path, ...tagText].join(' ');
+  const or = tokens.filter(t => t.startsWith('|')).map(t => t.slice(1));
+  if (or.length && !or.some(t => tagText.some(x => fuzzyText(t, x)))) return false;
+  for (const raw of tokens) {
+    const token = raw.replace(/^"|"$/g, '');
+    if (!token || token === '+') continue;
+    const prefix = token[0], value = (prefix === '+' || prefix === '-' || prefix === '|') ? token.slice(1) : token;
+    if (prefix === '|') continue;
+    if (prefix === '+' && !tagText.some(x => fuzzyText(value, x))) return false;
+    else if (prefix === '-' && tagText.some(x => fuzzyText(value, x))) return false;
+    else if (!['+','-'].includes(prefix) && token.includes(':')) {
+      const [kind, val] = token.split(/:(.*)/s);
+      if (kind.toLowerCase() === 'tag' && !tagText.some(x => fuzzyText(val, x))) return false;
+      else if (kind.toLowerCase() === 'name' && !fuzzyText(val, f.name)) return false;
+      else if (kind.toLowerCase() === 'game' && !tagText.some(x => GAMES.includes(x) && fuzzyText(val, x))) return false;
+      else if (!['tag','name','game'].includes(kind.toLowerCase()) && !fuzzyText(token, text)) return false;
+    } else if (!['+','-'].includes(prefix) && !fuzzyText(token, text)) return false;
+  }
+  return true;
+}
+
+function applyLocalSearch() {
+  const path = files[cur]?.path;
+  const q = [...searchChips.map(x => x.prefix + x.tag), $('query').value.trim()].filter(Boolean).join(' ');
+  files = allFiles.filter(f => localSearchMatch(f, q));
+  cur = path ? files.findIndex(f => f.path === path) : -1;
+  renderList(); renderDetail(); updateCounts();
+}
+
+function renderSearchChips() {
+  $('search-chips').innerHTML = searchChips.map((x, i) =>
+    `<span class="search-chip ${x.prefix === '|' ? 'or' : x.prefix === '-' ? 'not' : ''}">${x.prefix}${esc(x.tag)}<button title="Remove filter" onclick="removeSearchChip(${i});event.stopPropagation()">×</button></span>`).join('');
+}
+
+function removeSearchChip(i) { searchChips.splice(i, 1); renderSearchChips(); applyLocalSearch(); }
+
+function chooseTag(tag, prefix = '+') {
+  const input = $('query');
+  const base = input.value.replace(/(?:^|\s)[+|-][^\s]*$/, '').trim();
+  searchChips.push({prefix, tag});
+  input.value = base;
+  renderSearchChips();
+  $('tag-menu').style.display = 'none'; applyLocalSearch();
+}
+
+function onSearchInput(input) {
+  applyLocalSearch();
+  const token = input.value.split(/\s+/).pop() || '';
+  const prefix = ['+','|','-'].includes(token[0]) ? token[0] : '';
+  const menu = $('tag-menu');
+  if (!prefix) { menu.style.display = 'none'; return; }
+  const needle = token.slice(1).toLocaleLowerCase();
+  const tags = availableTags().filter(t => t.toLocaleLowerCase().includes(needle)).slice(0, 30);
+  menu.innerHTML = tags.map(t => `<button class="tag-menu-item" onclick='chooseTag(${JSON.stringify(t)}, ${JSON.stringify(prefix)})'>${prefix}${esc(t)}</button>`).join('');
+  menu.style.display = tags.length ? 'block' : 'none';
+}
+
+function searchKey(e) { if (e.key === 'Escape' || e.key === 'Enter') $('tag-menu').style.display = 'none'; }
+
+async function loadLibraries() {
+  const d = await fetch('/api/libraries').then(r => r.json());
+  libraries = d.folders || [];
+  $('recent-libraries').innerHTML = libraries.length
+    ? libraries.map((path, i) => `<button class="library-link" title="${esc(path)}" onclick="openLibrary(${i})">▸ ${esc(path.split('\\').pop() || path)}</button>`).join('')
+    : '<span class="side-foot">No imported folders yet</span>';
+}
+
+function openLibrary(i) {
+  const path = libraries[i];
+  if (!path) return;
+  $('folder').value = path;
+  if (!$('library').value.trim()) $('library').value = path;
+  scan();
+}
+
+async function loadTagLibrary() {
+  const d = await fetch('/api/tag-library').then(r => r.json());
+  tagGroups = d.groups || [];
+  renderTagPanel();
+}
+
+function renderTagPanel() {
+  const select = $('new-tag-group');
+  select.innerHTML = tagGroups.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('');
+  $('tag-panel-groups').innerHTML = tagGroups.map(g => `<div class="tag-panel-group"><h3>${esc(g.name)}</h3>${g.tags.map(tag =>
+    `<div class="tag-panel-row"><button class="tag-filter ${['⭐','★','🌟','☆'].includes(tag) ? 'favorite' : ''}" draggable="true" ondragstart='startTagDrag(event, ${JSON.stringify(tag)})' onclick='chooseTag(${JSON.stringify(tag)})'>${esc(tag)}</button><button class="tag-edit" title="Rename tag" onclick='editLibraryTag(${JSON.stringify(tag)})'>Edit</button><button class="tag-delete" title="Remove from library" onclick='deleteLibraryTag(${JSON.stringify(tag)})'>×</button></div>`).join('')}</div>`).join('');
+  tagCatalog = [...new Set([...tagCatalog, ...tagGroups.flatMap(g => g.tags)])];
+}
+
+function toggleTagPanel() {
+  const panel = $('tag-panel');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+  if (panel.style.display === 'block') loadTagLibrary();
+}
+
+async function updateTagLibrary(payload) {
+  const d = await fetch('/api/tag-library', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)}).then(r => r.json());
+  if (d.error) return alert(d.error);
+  tagGroups = d.groups || []; renderTagPanel(); renderTagBar();
+}
+
+function addLibraryTag() {
+  const tag = $('new-tag').value.trim(); if (!tag) return;
+  updateTagLibrary({action: 'add', tag, group: $('new-tag-group').value});
+  $('new-tag').value = '';
+}
+
+function editLibraryTag(tag) {
+  const next = prompt(`Rename tag “${tag}” to:`, tag);
+  if (next && next.trim() && next.trim() !== tag) updateTagLibrary({action: 'edit', old: tag, new: next.trim()});
+}
+
+function deleteLibraryTag(tag) {
+  if (confirm(`Remove “${tag}” from the tag library? Existing files will keep this tag.`))
+    updateTagLibrary({action: 'delete', tag});
 }
 
 async function loadMoodFolders() {
@@ -187,12 +440,13 @@ function updateCounts() {
 function renderList() {
   const el = $('list');
   if (!files.length) { el.innerHTML = '<div class="empty">Nothing found.</div>'; return; }
-  el.innerHTML = files.map((f, i) => {
-    const tags = f.selected ? [...f.selected] : f.existing_tags;
-    const chips = tags.map(t => `<span class="chip ${MOOD.includes(t)?'mood':'sound'} ${f.selected?'':'old'}">${t}</span>`).join('');
-    return `<div class="row ${i===cur?'sel':''}" onclick="select(${i})">
-      <div class="nm"><span class="dot ${f.status}"></span> ${esc(f.rel || f.name)}</div>
+  el.innerHTML = `<div class="list-head"><span>NAME</span><span>TAGS</span><span>TYPE</span></div>` + files.map((f, i) => {
+    const tags = f.selected ? [...new Set([...f.selected, ...(f.all_tags || [])])] : (f.all_tags || (f.kind === 'sfx' ? f.sfx_tags : f.existing_tags));
+    const chips = tags.map(t => `<span class="chip ${f.kind === 'sfx' ? 'sfx' : (MOOD.includes(t)?'mood':'sound')} ${f.selected?'':'old'}" onclick='event.stopPropagation(); chooseTag(${JSON.stringify(t)})'>${esc(t)}</span>`).join('');
+    return `<div class="row ${i===cur?'sel':''}" onclick="select(${i})" ondragover="allowTagDrop(event)" ondrop="dropTag(event, ${i})">
+      <div class="nm"><span class="drag-handle" title="Drag this audio file into another app" draggable="true" ondragstart="startFileDrag(event, ${i})" onclick="event.stopPropagation()">⠿</span><span class="dot ${f.status}"></span> ${f.kind === 'sfx' ? '🔊 ' : ''}${esc(f.rel || f.name)}</div>
       <div class="sub">${chips || '<span class="chip old">untagged</span>'}</div>
+      <div class="kind">${f.kind === 'sfx' ? 'SFX' : 'MUSIC'}</div>
     </div>`;
   }).join('');
 }
@@ -200,14 +454,64 @@ function renderList() {
 function esc(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 async function select(i) {
-  cur = i; renderList(); renderDetail();
+  cur = i;
   const f = files[i];
-  if (!f.res) await analyzeOne(i);
+  activateTrack(f);
+  renderList(); renderDetail();
+}
+
+function startFileDrag(event, i) {
+  const f = files[i];
+  const uri = 'file:///' + encodeURI(f.path.replaceAll('\\', '/'));
+  const download = new URL('/api/audio?path=' + encodeURIComponent(f.path), location.origin).href;
+  const extension = (f.name.split('.').pop() || 'audio').toLowerCase();
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData('text/plain', f.path);
+  event.dataTransfer.setData('text/uri-list', uri);
+  // Chromium's DownloadURL gives compatible targets an actual audio-file drop,
+  // while text/plain remains useful for software that accepts a file path.
+  event.dataTransfer.setData('DownloadURL', `audio/${extension}:${f.name}:${download}`);
+}
+
+function startTagDrag(event, tag) {
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData('application/x-music-tag', tag);
+  event.dataTransfer.setData('text/plain', tag);
+}
+
+function allowTagDrop(event) {
+  if (event.dataTransfer.types.includes('application/x-music-tag')) event.preventDefault();
+}
+
+async function dropTag(event, i) {
+  const tag = event.dataTransfer.getData('application/x-music-tag');
+  if (!tag || !files[i]) return;
+  event.preventDefault();
+  const f = files[i];
+  f.selected = new Set(f.all_tags || []);
+  f.selected.add(tag);
+  const ok = await saveFile(f);
+  if (ok) {
+    f.all_tags = [...f.selected];
+    f.existing_tags = f.all_tags.filter(t => MOOD.includes(t) || SOUND.includes(t));
+    f.sfx_tags = f.all_tags.filter(t => SFX.includes(t));
+    if (files.includes(f)) { renderList(); renderDetail(); }
+  }
+}
+
+function prepareSfx(i) {
+  const f = files[i];
+  f.res = {scores: {}, selected: f.sfx_tags || [], mood: [], sound: []};
+  f.selected = new Set(f.sfx_tags || []);
+  f.status = 'done';
+  renderDetail(); renderList(); updateCounts();
 }
 
 // ── analysis ────────────────────────────────────────────────────────────────
 async function analyzeOne(i) {
   const f = files[i];
+  f.status = 'analyzing';
+  renderList(); renderDetail();
   const d = await fetch('/api/analyze', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({path: f.path})
@@ -219,7 +523,8 @@ async function analyzeOne(i) {
 }
 
 async function analyzeAll() {
-  const todo = files.filter(f => !f.res).map(f => f.path);
+  for (let i = 0; i < files.length; i++) if (files[i].kind === 'sfx' && !files[i].res) prepareSfx(i);
+  const todo = files.filter(f => !f.res && f.kind !== 'sfx').map(f => f.path);
   if (!todo.length) return;
   $('btn-analyze').disabled = true;
   const r = await fetch('/api/analyze-batch', {
@@ -246,21 +551,193 @@ async function analyzeAll() {
   tick();
 }
 
-// ── detail ──────────────────────────────────────────────────────────────────
+// ── playback ────────────────────────────────────────────────────────────────
+function activateTrack(f) {
+  const url = '/api/audio?path=' + encodeURIComponent(f.path);
+  if (audioEngine.dataset.path !== f.path) {
+    audioEngine.pause();
+    audioEngine.src = url;
+    audioEngine.dataset.path = f.path;
+    audioEngine.load();
+  }
+  $('now-playing').textContent = f.name;
+  $('now-meta').textContent = f.rel || f.path;
+  waveSelection = null; selectionClip = null; updateClipDrag();
+  ensureWaveform(f);
+  // This executes directly inside the row-click gesture, so WebView2 is allowed
+  // to start audio immediately instead of waiting for an HTML5 controls click.
+  audioEngine.play().catch(() => {});
+  warmNextTrack();
+  updateTransport();
+}
+
+function startTagging(i = cur) {
+  if (i < 0 || !files[i] || files[i].res) return;
+  const f = files[i];
+  if (f.kind === 'sfx') prepareSfx(i);
+  else analyzeOne(i);
+}
+
+function warmNextTrack() {
+  const next = files[cur + 1];
+  if (!next) return;
+  preloadAudio = new Audio('/api/audio?path=' + encodeURIComponent(next.path));
+  preloadAudio.preload = 'auto';
+}
+
+async function ensureWaveform(f) {
+  if (!f.wave) {
+    try { f.wave = await fetch('/api/waveform?points=2400&path=' + encodeURIComponent(f.path)).then(r => r.json()); }
+    catch (_) { f.wave = {peaks: [], duration: 0}; }
+  }
+  if (files[cur] === f) drawTransport();
+}
+
+function drawTransport() {
+  const f = files[cur], canvas = $('transport-wave');
+  if (!f || !canvas) return;
+  const rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height, peaks = f.wave?.peaks || [];
+  const duration = audioEngine.duration || f.wave?.duration || 0;
+  const zoom = Number($('wave-zoom').value || 1), visible = 1 / zoom;
+  const position = duration ? audioEngine.currentTime / duration : 0;
+  const start = Math.max(0, Math.min(1 - visible, position - visible / 2));
+  const end = Math.min(1, start + visible);
+  const from = Math.floor(start * peaks.length), to = Math.max(from + 1, Math.ceil(end * peaks.length));
+  ctx.fillStyle = '#090b0e'; ctx.fillRect(0, 0, w, h);
+  if (waveSelection?.path === f.path && duration) {
+    const a = waveSelection.start / duration, b = waveSelection.end / duration;
+    const left = Math.max(0, (Math.max(start, a) - start) / visible) * w;
+    const right = Math.min(1, (Math.min(end, b) - start) / visible) * w;
+    if (right > left) { ctx.fillStyle = 'rgba(84,188,241,.22)'; ctx.fillRect(left, 0, right - left, h); }
+  }
+  ctx.strokeStyle = '#262d37'; ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+  const columns = Math.max(1, Math.floor(w));
+  for (let x = 0; x < columns; x++) {
+    const a = from + Math.floor((to - from) * x / columns);
+    const b = Math.min(to, from + Math.ceil((to - from) * (x + 1) / columns));
+    let peak = 0;
+    for (let p = a; p < b; p++) peak = Math.max(peak, peaks[p] || 0);
+    const ratio = start + (end - start) * x / columns;
+    const amp = Math.max(1, peak * h * .44);
+    ctx.fillStyle = ratio <= position ? '#54bcf1' : '#aeb7c4';
+    ctx.fillRect(x, h / 2 - amp, 1, amp * 2);
+  }
+  $('transport-time').textContent = `${fmtTime(audioEngine.currentTime)} / ${fmtTime(duration)}`;
+}
+
+function seekTransport(e) {
+  const f = files[cur], canvas = $('transport-wave');
+  if (!f || !canvas) return;
+  const duration = audioEngine.duration || f.wave?.duration || 0;
+  if (!duration) return;
+  const zoom = Number($('wave-zoom').value || 1), visible = 1 / zoom;
+  const position = audioEngine.currentTime / duration;
+  const start = Math.max(0, Math.min(1 - visible, position - visible / 2));
+  const ratio = start + visible * ((e.clientX - canvas.getBoundingClientRect().left) / canvas.clientWidth);
+  audioEngine.currentTime = Math.max(0, Math.min(duration, ratio * duration));
+}
+
+function wavePosition(e) {
+  const f = files[cur], canvas = $('transport-wave');
+  const duration = audioEngine.duration || f?.wave?.duration || 0;
+  if (!f || !duration) return null;
+  const zoom = Number($('wave-zoom').value || 1), visible = 1 / zoom;
+  const position = audioEngine.currentTime / duration;
+  const start = Math.max(0, Math.min(1 - visible, position - visible / 2));
+  const local = Math.max(0, Math.min(1, (e.clientX - canvas.getBoundingClientRect().left) / canvas.clientWidth));
+  return Math.max(0, Math.min(duration, (start + visible * local) * duration));
+}
+
+function startWaveSelection(e) {
+  const time = wavePosition(e); if (time === null) return;
+  wavePointer = {time, x: e.clientX};
+  $('transport-wave').setPointerCapture(e.pointerId);
+}
+
+function moveWaveSelection(e) {
+  if (!wavePointer) return;
+  const time = wavePosition(e); if (time === null || Math.abs(e.clientX - wavePointer.x) < 4) return;
+  waveSelection = {path: files[cur].path, start: Math.min(wavePointer.time, time), end: Math.max(wavePointer.time, time)};
+  selectionClip = null; updateClipDrag(); drawTransport();
+}
+
+async function endWaveSelection(e) {
+  if (!wavePointer) return;
+  const origin = wavePointer; wavePointer = null;
+  const time = wavePosition(e); if (time === null) return;
+  if (Math.abs(e.clientX - origin.x) < 4) { audioEngine.currentTime = time; return; }
+  waveSelection = {path: files[cur].path, start: Math.min(origin.time, time), end: Math.max(origin.time, time)};
+  updateClipDrag('Rendering selection…'); drawTransport();
+  const selection = waveSelection;
+  const d = await fetch('/api/clip', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: selection.path, start: selection.start, end: selection.end})}).then(r => r.json());
+  if (waveSelection === selection && !d.error) { selectionClip = d; updateClipDrag(); }
+  else if (d.error) updateClipDrag(d.error);
+}
+
+function updateClipDrag(message = '') {
+  const drag = $('clip-drag'), note = $('selection-note');
+  drag.hidden = !selectionClip;
+  note.textContent = message || (waveSelection
+    ? `${fmtTime(waveSelection.start)}–${fmtTime(waveSelection.end)}${selectionClip ? ' · ready to drag' : ''}`
+    : 'Drag on waveform to select a clip');
+}
+
+function startClipDrag(event) {
+  if (!selectionClip) return event.preventDefault();
+  const url = new URL(selectionClip.url, location.origin).href;
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData('text/uri-list', url);
+  event.dataTransfer.setData('DownloadURL', `audio/wav:${selectionClip.name}:${url}`);
+  event.dataTransfer.setData('text/plain', selectionClip.name);
+}
+
+function updateTransport() {
+  $('btn-play').textContent = audioEngine.paused ? '▶' : '❚❚';
+  drawTransport();
+}
+function togglePlayback() { if (!audioEngine.src) return; audioEngine.paused ? audioEngine.play() : audioEngine.pause(); }
+function previousTrack() { if (cur > 0) select(cur - 1); }
+function nextTrack() { if (cur < files.length - 1) select(cur + 1); }
+function cycleRate() { playbackRate = playbackRate >= 2 ? 0.75 : playbackRate + 0.25; audioEngine.playbackRate = playbackRate; $('rate-btn').textContent = `${playbackRate}×`; }
+function setVolume(value) { audioEngine.volume = Number(value) / 100; }
+audioEngine.volume = .85;
+audioEngine.addEventListener('timeupdate', updateTransport);
+audioEngine.addEventListener('loadedmetadata', updateTransport);
+audioEngine.addEventListener('play', updateTransport);
+audioEngine.addEventListener('pause', updateTransport);
+audioEngine.addEventListener('ended', nextTrack);
+$('transport-wave').addEventListener('pointerdown', startWaveSelection);
+$('transport-wave').addEventListener('pointermove', moveWaveSelection);
+$('transport-wave').addEventListener('pointerup', endWaveSelection);
+window.addEventListener('resize', drawTransport);
+
+// ── tagging detail ──────────────────────────────────────────────────────────
 function renderDetail() {
   const el = $('detail');
   if (cur < 0 || !files[cur]) { el.innerHTML = '<div class="empty">No file selected.</div>'; return; }
   const f = files[cur];
 
   let body = `<div class="fname">${esc(f.name)}</div>
-    <div class="fpath">${esc(f.path)}</div>
-    <audio controls preload="none" src="/api/audio?path=${encodeURIComponent(f.path)}"></audio>`;
+    <div class="fpath">${esc(f.path)}</div>`;
 
   if (f.other_tags?.length)
     body += `<div class="sub" style="margin-top:8px">${f.other_tags.map(t=>`<span class="chip old">${esc(t)}</span>`).join('')}</div>`;
 
   if (f.status === 'err') body += `<p class="err">${esc(f.error || 'failed')}</p>`;
-  else if (!f.res) body += `<p class="empty">Analyzing…</p>`;
+  else if (!f.res) body += `<div class="empty">${f.status === 'analyzing'
+    ? 'Analyzing this file…'
+    : `${f.kind === 'sfx' ? 'SFX tags are manual.' : 'Selecting a file only plays it. Analysis starts here, when you ask for it.'}<br><br><button class="primary" onclick="startTagging()">${f.kind === 'sfx' ? 'Start SFX tagging' : 'Analyze for tags'}</button>`}</div>`;
+  else if (f.kind === 'sfx') body += `<p class="fpath" style="margin-top:12px;color:var(--warn)">SFX uses broad production labels. Start with one use-case tag and add a material or action tag only when it improves retrieval.</p>` + sfxGroup(f) + `
+    <div style="margin-top:18px;display:flex;gap:8px">
+      <button class="primary" onclick="save()">Save SFX tags</button>
+      <button onclick="reset()">Reset</button>
+      <button onclick="clearAll()">Clear all</button>
+    </div>`;
   else body += gamePicker(f) + primaryPicker(f) + group('Mood', MOOD, f) + group('Sound', SOUND, f) + `
     <div style="margin-top:18px;display:flex;gap:8px">
       <button class="primary" onclick="save()">Save tags</button>
@@ -272,6 +749,8 @@ function renderDetail() {
     </p>`;
   el.innerHTML = body;
 }
+
+function fmtTime(s) { if (!Number.isFinite(s)) return '—'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
 
 // The folder a track gets filed under. A track averages 1.6 moods, so one has
 // to be primary; default to the highest-scoring one, overridable per file.
@@ -350,6 +829,14 @@ function group(title, tags, f) {
   return `<h2>${title}</h2>${rows}`;
 }
 
+function sfxGroup(f) {
+  const rows = SFX.map(t => `<div class="tag ${f.selected.has(t) ? 'on' : 'off'}" onclick="toggle('${t}')">
+    <div class="nm">${esc(t)}<span class="src manual">manual</span></div>
+    <div class="meter"><i style="width:${f.selected.has(t) ? 100 : 0}%"></i></div><div class="num">${f.selected.has(t) ? 'on' : 'off'}</div>
+  </div>`).join('');
+  return `<h2>SFX tags</h2>${rows}`;
+}
+
 function toggle(t) {
   const f = files[cur];
   f.selected.has(t) ? f.selected.delete(t) : f.selected.add(t);
@@ -365,11 +852,12 @@ async function saveFile(f) {
   const d = await fetch('/api/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({path: f.path, tags: [...f.selected],
-                          game: f.game ? null : (f.gamePick || null),
+                          game: f.kind === 'sfx' || f.game ? null : (f.gamePick || null),
                           allow_new_game: true})
   }).then(r => r.json());
   if (d.error) { alert(d.error); return false; }
-  f.existing_tags = [...f.selected];
+  if (f.kind === 'sfx') f.sfx_tags = [...f.selected];
+  else f.existing_tags = [...f.selected];
   if (!f.game && f.gamePick) f.game = f.gamePick;
   f.status = 'saved';
   return true;
@@ -445,6 +933,81 @@ async function moveFiles(list) {
 function summarise(rows) {
   const by = rows.reduce((a, x) => (a[x.status] = (a[x.status]||0)+1, a), {});
   return Object.entries(by).map(([k, v]) => `  ${v} ${k}`).join('\n');
+}
+
+// ── node view ──────────────────────────────────────────────────────────────
+function toggleView() {
+  viewMode = viewMode === 'library' ? 'graph' : 'library';
+  applyViewMode();
+}
+
+function showLibrary() {
+  if (viewMode !== 'library') { releaseTagger(); viewMode = 'library'; applyViewMode(); }
+}
+
+function showTagging() {
+  viewMode = 'tagging';
+  applyViewMode();
+  renderDetail();
+}
+
+function showNodeView() {
+  if (viewMode !== 'graph') { releaseTagger(); viewMode = 'graph'; applyViewMode(); }
+}
+
+async function releaseTagger() {
+  const r = await fetch('/api/unload-model', {method: 'POST'}).then(x => x.json());
+  if (!r.error) modelInfo = null;
+}
+
+function applyViewMode() {
+  $('btn-view').textContent = viewMode === 'graph' ? 'Library view' : 'Node view';
+  document.querySelector('main').style.display = viewMode === 'library' ? 'flex' : 'none';
+  $('tagging-view').style.display = viewMode === 'tagging' ? 'flex' : 'none';
+  $('graph-view').style.display = viewMode === 'graph' ? 'flex' : 'none';
+  document.querySelectorAll('[data-tagging-action]').forEach(x => {
+    x.style.display = viewMode === 'tagging' ? 'inline-block' : 'none';
+  });
+  document.querySelectorAll('.side-item').forEach(x => x.classList.remove('active'));
+  const nav = document.querySelectorAll('.side-item');
+  const active = viewMode === 'tagging' ? 1 : (viewMode === 'graph' ? 2 : 0);
+  if (nav[active]) nav[active].classList.add('active');
+  if (viewMode === 'graph') renderGraph();
+}
+
+function renderGraph() {
+  const canvas = $('graph-canvas'); if (!canvas) return;
+  const rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr)); canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height; ctx.fillStyle = '#0b0e12'; ctx.fillRect(0,0,w,h);
+  const nodes = files.map((f, i) => {
+    const tags = f.selected ? [...f.selected] : (f.kind === 'sfx' ? f.sfx_tags : f.existing_tags);
+    const major = f.kind === 'sfx' ? (tags[0] || 'SFX / untagged') : (tags.find(t => MOOD.includes(t)) || tags[0] || 'Untagged');
+    const minor = tags.find(t => t !== major) || '';
+    return {f, i, major, minor};
+  });
+  const groups = [...new Set(nodes.map(n => n.major))];
+  graphNodes = [];
+  nodes.forEach((n, idx) => {
+    const gi = groups.indexOf(n.major), members = nodes.filter(x => x.major === n.major);
+    const local = members.indexOf(n), cols = Math.max(1, Math.ceil(Math.sqrt(members.length)));
+    const x = ((gi + .5) / Math.max(1, groups.length)) * w + ((local % cols) - cols/2) * 14;
+    const y = 70 + (Math.floor(local / cols) + .5) * Math.min(52, (h - 100) / Math.max(1, Math.ceil(members.length / cols)));
+    graphNodes.push({...n, x, y});
+  });
+  ctx.font = '12px Segoe UI';
+  groups.forEach((g, gi) => { const x = ((gi + .5) / Math.max(1, groups.length)) * w; ctx.fillStyle='#8b93a5'; ctx.textAlign='center'; ctx.fillText(g, x, 30); });
+  graphNodes.forEach(n => {
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.i === cur ? 7 : 5, 0, Math.PI*2);
+    ctx.fillStyle = n.f.kind === 'sfx' ? '#fbbf24' : (MOOD.includes(n.major) ? '#4ade80' : '#38bdf8'); ctx.fill();
+    if (n.i === cur) { ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke(); }
+  });
+  canvas.onclick = e => {
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const hit = graphNodes.find(n => Math.hypot(n.x-x,n.y-y) < 10);
+    if (hit) { if (viewMode === 'graph') toggleView(); select(hit.i); }
+  };
 }
 
 // ── model dialog + retrain ──────────────────────────────────────────────────

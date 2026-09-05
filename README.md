@@ -106,6 +106,38 @@ supported — the CUDA torch wheels lag behind.
 
 `ffmpeg` must be on `PATH` (it already is at `C:\Program Files\ffmpeg\bin`).
 
+## Desktop app
+
+The review UI now runs inside a native WebView2 desktop window rather than
+opening the system browser. Use `run.bat`, or open the built executable at
+`dist\MusicTagger.exe`. The executable is a small launcher for the project's
+managed Python environment, so the several-gigabyte ML runtime is not copied
+into a second bundle. `build.bat` rebuilds it after installing PyInstaller.
+
+The desktop UI adds:
+
+- a local AND search over filenames and sidecar tags, for example
+  `tag:Epic tag:Orchestral game:Celeste`;
+- cached waveform previews with click-to-seek playback;
+- a node view that clusters files by their primary mood or SFX category and
+  lets you jump back to a file;
+- an **include SFX** mode. SFX is intentionally manual for now and uses broad
+  production labels such as `Impact`, `Whoosh`, `Interface`, `Foley`, `Voice`,
+  `Ambience`, `One-Shot` and `Loop`.
+
+### Recommended SFX workflow
+
+Tag an effect by retrieval purpose first (what an editor would search for),
+then add only the material/action labels that disambiguate it. Keep one-shot
+and loop labels separate, and avoid turning every audible detail into a tag.
+This keeps searches useful and leaves room for a future dedicated SFX model;
+the music model is never trained on SFX labels.
+
+The current desktop host is deliberately small and uses the Windows WebView2
+runtime. Rewriting the trained Python/torch pipeline in Odin would be a much
+larger portability and model-runtime project, so it is not part of this first
+desktop slice.
+
 ## Usage
 
 Compare encoders on your own labels:

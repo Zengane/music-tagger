@@ -27,18 +27,39 @@ C_GRID = (0.1, 0.5, 1.0, 4.0, 16.0)
 
 # Threshold bias, per tag. Above 1 favours recall, below 1 favours precision.
 #
-# The default leans toward recall because a missing tag is invisible in
-# TagSpaces while a wrong one is one click to remove. Vocals is the exception:
-# it exists to filter tracks *out* of an edit, so a false positive quietly
-# retires a usable instrumental. Choir has the same job on a smaller scale.
-DEFAULT_BETA = 1.5
+# This was 1.5 — leaning hard toward recall — on the reasoning that a missing
+# tag is invisible while a wrong one is one click to remove. That was true when
+# the tags were reviewed in TagSpaces. It is not true now: the Tagging tab puts
+# every suggestion in front of you, so a wrong tag is not a click to remove, it
+# is a judgement to make, on every file, forever. At beta 1.5 the model was
+# right about half the time (macro precision 0.50 at recall 0.74), which reads
+# exactly like "it doesn't tag things the way I would" — because half of what
+# it said, you disagreed with.
+#
+# Below 1 the threshold moves the other way: fewer suggestions, and the ones
+# that come are ones you will usually keep. The tags it now stays quiet about
+# are the ones it was never sure of anyway.
+DEFAULT_BETA = 0.7
+
+# Per-tag exceptions.
+#
+# Vocals exists to filter tracks *out* of an edit, so a false positive quietly
+# retires a usable instrumental — it stays stricter than the rest. Choir has
+# the same job on a smaller scale.
 TAG_BETA = {
-    "Vocals": 0.6,
-    "Choir": 0.9,
+    "Vocals": 0.5,
+    "Choir": 0.7,
 }
+
+# Set by train.py from --beta, so the trade-off can be moved without editing
+# this file. None means "use the values above".
+BETA_OVERRIDE: float | None = None
 
 
 def beta_for(tag: str) -> float:
+    if BETA_OVERRIDE is not None:
+        # The per-tag exceptions keep their relative strictness.
+        return BETA_OVERRIDE * (TAG_BETA.get(tag, DEFAULT_BETA) / DEFAULT_BETA)
     return TAG_BETA.get(tag, DEFAULT_BETA)
 
 
@@ -72,6 +93,83 @@ def out_of_fold_scores(X, y, n_splits=5, seed=0) -> tuple[np.ndarray, float]:
         if ap > best_ap:
             best, best_ap, best_C = oof, ap, C
     return best, best_C
+
+
+# How often a suggestion has to be right before it is applied on its own.
+#
+# One global bias was the wrong shape for this problem. At 1.5 the model applied
+# everything it half-believed and was right about half the time; at 0.7 it went
+# quiet and applied one or two tags to a track that deserved five. Neither is a
+# statement about the model — it is a statement about *thresholds*, and the
+# right threshold is different for every tag, because the tags are not equally
+# learnable. Victory is separable and Mysterious is not.
+#
+# So each tag is given the lowest threshold at which it is right this often, and
+# keeps as much recall as that allows. A tag that cannot reach it at any
+# threshold is not applied at all — it becomes a suggestion, ranked in the list
+# with its score, one click to accept. Nothing is lost: what used to be a wrong
+# tag on your file is now a proposal you can ignore.
+# 0.60, chosen from the sweep in sweep.py rather than by feel.
+#
+# Zengane tags 3.1 of these per track. At 0.60 the model applies 2.9 — the same
+# handful — of which about 1.8 are ones he would have chosen and 1.2 are ones to
+# take off. Higher and it goes quiet (1.8 tags at 0.70, of which only 1.2 land);
+# lower and the wrong ones outnumber the right. Removing one wrong tag is a
+# click; finding two missing ones means listening to the track again.
+TARGET_PRECISION = 0.60
+
+# Below this a tag is not worth auto-applying however precise it looks, because
+# it would fire on almost nothing.
+MIN_RECALL = 0.15
+
+
+def threshold_for_precision(y, probs, target=TARGET_PRECISION):
+    """Lowest threshold that is right `target` of the time. Recall is maximised.
+
+    Returns (threshold, precision, recall, reached) where `reached` says whether
+    the target was actually met — a tag that misses it is suggestion-only.
+    """
+    order = np.unique(probs)
+    if order.size < 2:
+        return 0.5, 0.0, 0.0, False
+    cands = (order[:-1] + order[1:]) / 2
+    if cands.size > 400:
+        cands = np.quantile(cands, np.linspace(0, 1, 400))
+
+    best = None
+    for t in cands:
+        pred = probs >= t
+        tp = float((pred & (y == 1)).sum())
+        if tp == 0:
+            continue
+        prec = tp / pred.sum()
+        rec = tp / y.sum()
+        if prec < target or rec < MIN_RECALL:
+            continue
+        # Every candidate here already clears the bar, so the one that finds
+        # the most is the one to take.
+        if best is None or rec > best[2]:
+            best = (float(t), prec, rec, True)
+
+    if best is not None:
+        return best
+
+    # Cannot be trusted on its own at any threshold. The number handed back is
+    # the most precise point it does reach, so the suggestion list still has
+    # somewhere sensible to draw its notch.
+    fallback = (0.5, 0.0, 0.0, False)
+    for t in cands:
+        pred = probs >= t
+        tp = float((pred & (y == 1)).sum())
+        if tp == 0:
+            continue
+        prec = tp / pred.sum()
+        rec = tp / y.sum()
+        if rec < MIN_RECALL:
+            continue
+        if prec > fallback[1]:
+            fallback = (float(t), prec, rec, False)
+    return fallback
 
 
 def best_threshold(y, probs, beta=DEFAULT_BETA) -> tuple[float, float, float, float]:
@@ -116,7 +214,8 @@ def evaluate(X, Y, tags=ALL_TAGS, seed=0) -> dict:
             auc = roc_auc_score(y, oof)
         except ValueError:
             auc = float("nan")
-        thr, prec, rec, f = best_threshold(y, oof, beta=beta_for(tag))
+        thr, prec, rec, auto = threshold_for_precision(y, oof)
+        f = 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)
         prevalence = n_pos / len(y)
         rows.append({
             "tag": tag,
@@ -131,10 +230,16 @@ def evaluate(X, Y, tags=ALL_TAGS, seed=0) -> dict:
             "precision": prec,
             "recall": rec,
             "f": f,
+            # Whether this tag is applied on its own, or only offered.
+            "auto": bool(auto),
         })
 
     trainable = [r for r in rows if r.get("trainable")]
+    auto_tags = [r for r in trainable if r.get("auto")]
     summary = {
+        "n_auto": len(auto_tags),
+        "macro_auto_precision": float(np.mean([r["precision"] for r in auto_tags])) if auto_tags else 0.0,
+        "macro_auto_recall": float(np.mean([r["recall"] for r in auto_tags])) if auto_tags else 0.0,
         "macro_ap": float(np.mean([r["ap"] for r in trainable])) if trainable else 0.0,
         "macro_auc": float(np.nanmean([r["auc"] for r in trainable])) if trainable else 0.0,
         "macro_lift": float(np.mean([r["lift"] for r in trainable])) if trainable else 0.0,
@@ -159,6 +264,7 @@ def fit_final(X, Y, report, tags=ALL_TAGS) -> dict:
             "coef": clf.coef_[0].astype(np.float32),
             "intercept": float(clf.intercept_[0]),
             "threshold": r["threshold"],
+            "auto": bool(r.get("auto", True)),
             "cv_precision": r["precision"],
             "cv_recall": r["recall"],
             "cv_ap": r["ap"],

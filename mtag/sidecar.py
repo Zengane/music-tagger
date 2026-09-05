@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .taxonomy import ALL_TAGS, GAME_ALIASES, TAG_ALIASES
+from .taxonomy import ALL_TAGS, GAME_ALIASES, LIBRARY_TAGS, SFX_TAGS, TAG_ALIASES
 
 APP_NAME = "TagSpaces"
 APP_VERSION = "6.5.3"
@@ -44,13 +44,18 @@ def read_taxonomy_tags(filepath) -> list[str]:
     return [t for t in read_tags(filepath) if t in ALL_TAGS]
 
 
+def read_sfx_tags(filepath) -> list[str]:
+    """Only the production sound-effect tags this tool is responsible for."""
+    return [t for t in read_tags(filepath) if t in SFX_TAGS]
+
+
 def _is_ours(title: str) -> bool:
     """Whether writing Mood/Sound tags should replace this one.
 
     Covers the misspellings too, so saving a file tagged "Jazz" leaves "Jazzy"
     behind rather than both.
     """
-    return title in ALL_TAGS or TAG_ALIASES.get(title) in ALL_TAGS
+    return title in LIBRARY_TAGS or TAG_ALIASES.get(title) in LIBRARY_TAGS
 
 
 def write_tags(filepath, tags: list[str], game: str | None = None) -> None:
@@ -63,7 +68,8 @@ def write_tags(filepath, tags: list[str], game: str | None = None) -> None:
     p = Path(filepath)
     existing = read_sidecar(p)
     kept = [t for t in existing.get("tags", []) if not _is_ours(t.get("title", ""))]
-    new = [{"title": tag, "type": "sidecar"} for tag in tags]
+    kept_titles = {t.get("title", "") for t in kept}
+    new = [{"title": tag, "type": "sidecar"} for tag in tags if tag not in kept_titles]
     if game:
         from .gametag import existing_game_tags
 

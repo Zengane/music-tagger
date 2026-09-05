@@ -22,6 +22,17 @@ if not exist "venv\Scripts\activate.bat" (
     echo [2/3] Skipping install. Delete the venv folder to reinstall.
 )
 
+:: Existing environments from v2 predate the desktop host; add only that small dependency.
+venv\Scripts\python.exe -c "import webview" >nul 2>&1
+if errorlevel 1 (
+    echo Installing the desktop host...
+    venv\Scripts\python.exe -m pip install -q pywebview
+    if errorlevel 1 (
+        echo ERROR: Could not install pywebview.
+        pause & exit /b 1
+    )
+)
+
 :: v1 shipped a CPU torch for months without anyone noticing. Fail loudly instead.
 venv\Scripts\python.exe -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"
 if errorlevel 1 (
@@ -40,9 +51,6 @@ if not exist "model\tagger.pkl" (
     pause & exit /b 1
 )
 
-echo [3/3] Starting Music Tagger...
-echo.
-echo  Browser opens automatically. Close this window to stop.
-echo.
-venv\Scripts\python.exe app.py
-pause
+echo [3/3] Starting Music Tagger desktop app...
+start "" /b venv\Scripts\pythonw.exe "%~dp0desktop.py"
+exit /b 0

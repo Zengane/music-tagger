@@ -1,0 +1,23 @@
+# Where the drop really is.
+#
+# The detector guesses; this is the answer key. One line per track:
+#
+#     <seconds>  <enough of the filename to find it>
+#
+# The name is matched loosely — any part of the path or filename will do, as
+# long as it picks out exactly one track. Times can be written as 12.5, as
+# 0:12.5, or as 1:02.
+#
+# Then run:
+#
+#     mtag-test.exe --dropcheck "H:\Media Browser\Mega Music Pack"
+#
+# It prints how far off each one is, and one number for the whole set. That
+# number is the thing to make smaller — every change to the detector can be
+# measured against it instead of argued about.
+#
+# Lines starting with # are ignored, and so are blank ones.
+
+4.5     A Hat in Time OST - 04 New Adventure
+3.3     03 - On Your Way
+35.3    Duel of Legend

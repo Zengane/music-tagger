@@ -76,6 +76,11 @@ class Tagger:
                     "score": p,
                     "threshold": m["threshold"],
                     "source": "probe",
+                    # Whether this tag is trusted to apply itself. See
+                    # TARGET_PRECISION in probes.py: a tag that cannot be right
+                    # 70% of the time is still scored and still ranked, it is
+                    # just never written to a file without being asked.
+                    "auto": bool(m.get("auto", True)),
                     "cv_precision": m.get("cv_precision"),
                     "cv_recall": m.get("cv_recall"),
                     "n_pos": m.get("n_pos"),
@@ -87,6 +92,9 @@ class Tagger:
                     "score": sim,
                     "threshold": z["threshold"],
                     "source": "zeroshot",
+                    # A tag with too few examples to train on is a guess from a
+                    # text prompt. Those are offered, never applied.
+                    "auto": False,
                     "n_pos": z.get("n_pos", 0),
                 }
             else:
@@ -94,9 +102,18 @@ class Tagger:
         return out
 
     def suggest(self, x: np.ndarray) -> dict:
-        """Scores plus the tags that clear their own threshold."""
+        """Scores, plus the tags trusted enough to apply themselves.
+
+        Everything is scored and everything is ranked; only the tags that
+        earned a threshold at the target precision are applied. The rest reach
+        the interface as suggestions with their score, which is one click to
+        accept and no clicks to ignore.
+        """
         scores = self.score(x)
-        selected = [t for t, s in scores.items() if s["score"] >= s["threshold"]]
+        selected = [
+            t for t, s in scores.items()
+            if s.get("auto", True) and s["score"] >= s["threshold"]
+        ]
         return {
             "scores": scores,
             "selected": selected,

@@ -23,7 +23,12 @@ console.init()
 RESULTS = Path(__file__).resolve().parent / "results"
 
 
-def train(library: str, encoder_name: str, out=MODEL_PATH) -> Tagger:
+def train(library: str, encoder_name: str, out=MODEL_PATH, beta: float | None = None) -> Tagger:
+    if beta is not None:
+        probes.BETA_OVERRIDE = beta
+        print(f"threshold bias {beta:.2f} "
+              f"({'fewer, surer suggestions' if beta < 1 else 'more suggestions, more wrong ones'})")
+
     paths, Y = collect_labelled(library)
     print(f"{len(paths)} labelled tracks")
 
@@ -84,8 +89,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("library")
     ap.add_argument("--encoder", default="fusion")
+    ap.add_argument(
+        "--precision", type=float, default=None,
+        help="how often a tag has to be right before it applies itself, 0..1. "
+             "Run sweep.py to see what each setting costs. Default 0.60.",
+    )
+    ap.add_argument(
+        "--beta", type=float, default=None,
+        help="threshold bias: below 1 suggests less and is right more often, "
+             "above 1 suggests more and is wrong more often. Default 0.7.",
+    )
     args = ap.parse_args()
-    train(args.library, args.encoder)
+    if args.precision is not None:
+        probes.TARGET_PRECISION = args.precision
+        print(f"applying a tag only when it is right {args.precision:.0%} of the time")
+    train(args.library, args.encoder, beta=args.beta)
 
 
 if __name__ == "__main__":

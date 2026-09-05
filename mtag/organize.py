@@ -14,6 +14,7 @@ and reported instead.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -122,6 +123,50 @@ def apply(entry: dict) -> dict:
     rekey_caches(src, dst, st.st_size, st.st_mtime)
     _prune_empty(src.parent)
     return {**entry, "moved": True}
+
+
+SOUNDMAP = Path(__file__).resolve().parent.parent / "model" / "soundmap.json"
+
+
+def rekey_soundmap(pairs, path: Path = SOUNDMAP) -> int:
+    """Follow moved files through the map's own coordinates.
+
+    The map places every track at a point and remembers it by absolute path, so
+    a move loses the place. Nothing noticed: the app simply saw those tracks as
+    unplaced, fell back to the layout built from measured audio, and the map
+    came back looking like a different feature. Filing 1649 tracks orphaned
+    1649 points at once.
+
+    Done in one pass at the end of a run rather than per file — the map is a
+    single JSON document and rewriting it per move would be a rewrite per move.
+
+    `pairs` is an iterable of (src, dst). Returns how many points were carried
+    over.
+    """
+    if not path.exists():
+        return 0
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+
+    points = doc.get("points")
+    if not isinstance(points, dict):
+        return 0
+
+    moved = 0
+    for src, dst in pairs:
+        src, dst = str(src), str(dst)
+        if src in points and src != dst:
+            points[dst] = points.pop(src)
+            moved += 1
+
+    if moved:
+        try:
+            path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            return 0
+    return moved
 
 
 def _prune_empty(folder: Path) -> None:

@@ -11,6 +11,8 @@ signal for tags like Build-Up.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -66,6 +68,27 @@ class Encoder:
     def embed_text(self, texts: list[str]) -> np.ndarray | None:
         """Only text-aligned encoders implement this; used for zero-shot fallback."""
         return None
+
+    def unload(self) -> None:
+        """Drop the weights and give the VRAM back. See `FusionEncoder.prefill`."""
+        for attr in ("model", "processor"):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        free_vram()
+
+
+def free_vram() -> None:
+    """Hand freed blocks back to the driver.
+
+    Torch keeps its own allocator pool, so deleting a model frees nothing the
+    driver can see until that pool is emptied.
+    """
+    import gc
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 
 class MuQMuLanEncoder(Encoder):
@@ -233,6 +256,59 @@ class FusionEncoder(Encoder):
         vec = np.concatenate([self.embed_part(n, filepath) for n in self.part_names])
         norm = np.linalg.norm(vec)
         return vec / norm if norm > 0 else vec
+
+    def unload_part(self, name: str) -> None:
+        """Take one part off the GPU and put an unloaded one in its place."""
+        part = self.parts.get(name)
+        if part is None:
+            return
+        self._loaded.discard(name)
+        part.unload()
+        self.parts[name] = ENCODERS[name]()
+
+    def prefill(self, paths, on_progress=None) -> None:
+        """Embed a whole batch, one model at a time.
+
+        The obvious order is file-major: take a track, run all three parts over
+        it, move on. That keeps three models resident, and three of these do not
+        fit on an 8 GiB card — measured at 7746 MiB of 8192 on a 3070 Ti, which
+        is the point where Windows starts serving the shortfall out of system
+        RAM over the PCIe bus. It does not fail; it goes roughly forty times
+        slower. A run of 905 files was measured at just under three minutes per
+        file, about 45 hours.
+
+        Model-major fixes it: load one part, embed every file that needs it,
+        hand the VRAM back, load the next. Peak use is one model instead of
+        three, and nothing spills. The cost is that no track is finished until
+        the last pass, so a caller that wants per-file results should call this
+        first and then read them out of the caches.
+
+        Files already cached for a part are skipped, and a part that is fully
+        cached is never loaded at all.
+        """
+        from .dataset import EmbeddingCache
+
+        paths = [Path(p) for p in paths]
+        for name in self.part_names:
+            cache = self._caches.setdefault(name, EmbeddingCache(name))
+            todo = [p for p in paths if not cache.has(p)]
+            if not todo:
+                if on_progress:
+                    on_progress(name, 0, 0, None, None)
+                continue
+
+            part = self._part(name)
+            try:
+                for i, p in enumerate(todo, 1):
+                    error = None
+                    try:
+                        cache.put(p, part.embed_file(p))
+                    except Exception as e:  # one bad file must not end the pass
+                        error = str(e)
+                    if on_progress:
+                        on_progress(name, i, len(todo), p, error)
+            finally:
+                self.unload_part(name)
 
     def text_slice(self, total_dim: int) -> tuple[int, int] | None:
         """The mean block of the first text-capable part, located in the concat."""

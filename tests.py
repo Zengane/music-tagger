@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from mtag import audio as A, console, organize, probes
-from mtag.sidecar import read_tags, read_taxonomy_tags, write_tags
+from mtag.sidecar import read_sfx_tags, read_tags, read_taxonomy_tags, write_tags
 from mtag.taxonomy import ALL_TAGS, AUDIO_EXTS, MOOD_TAGS, SOUND_TAGS
 
 console.init()
@@ -261,6 +261,53 @@ def test_skipping():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_search_and_sfx():
+    print("boolean search and SFX tags")
+    from mtag import search
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        f = tmp / "Celeste" / "01 - Mountain.mp3"
+        f.parent.mkdir(parents=True)
+        f.write_bytes(b"audio")
+        write_tags(f, ["Epic", "Orchestral", "Ambience", "Whoosh"], game="Celeste")
+        check(search.matches(f, "tag:Epic tag:Orchestral game:Celeste"),
+              "combined tag search uses AND semantics")
+        check(not search.matches(f, "tag:Epic tag:Chill"),
+              "a missing tag rejects the combined search")
+        check(search.matches(f, 'name:"01 - Mountain"'),
+              "quoted filename search works")
+        check(search.matches(f, '+Epic +Orchestral'),
+              "plus-prefixed tags require all matches")
+        check(search.matches(f, 'mountin'),
+              "bare search tolerates a small typo")
+        check(not search.matches(f, '-Epic'),
+              "minus-prefixed tags are excluded")
+        check(read_sfx_tags(f) == ["Ambience", "Whoosh"],
+              "SFX tags round-trip separately from music tags")
+        check(read_taxonomy_tags(f) == ["Epic", "Orchestral"],
+              "SFX tags do not enter the music taxonomy")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_waveform():
+    print("waveform preview")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        tone = tmp / "tone.wav"
+        _tone_wav(tone, 2)
+        preview = A.waveform(tone, 96)
+        check(1.8 < preview["duration"] < 2.2, "waveform reports duration")
+        check(len(preview["peaks"]) == 96, "waveform is downsampled to requested points")
+        check(max(preview["peaks"]) > 0.8, "waveform contains audio peaks")
+        clip = tmp / "selection.wav"
+        A.export_clip(tone, .25, .75, clip)
+        check(clip.exists() and .4 < A.duration_seconds(clip) < .9,
+              "selected waveform range exports as a short audio clip")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_tag_aliases():
     print("tag aliases")
     from mtag import gametag
@@ -437,8 +484,9 @@ def test_ffmpeg():
 
 if __name__ == "__main__":
     for t in (test_ffmpeg, test_sidecar, test_taxonomy_matches_library,
-              test_skipping, test_tag_aliases, test_gametag,
-              test_windows, test_organize, test_fusion_text_slice, test_probes):
+              test_skipping, test_search_and_sfx, test_waveform,
+              test_tag_aliases, test_gametag, test_windows, test_organize,
+              test_fusion_text_slice, test_probes):
         t()
     print()
     if _failures:

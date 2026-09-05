@@ -10,6 +10,7 @@ Here we spread a fixed number of windows across the whole duration so the
 embedding reflects the entire piece.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -21,8 +22,15 @@ FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
 
+def _run_process(command, **kwargs):
+    """Run a decoder without flashing a console in the Windows desktop app."""
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(command, **kwargs)
+
+
 def duration_seconds(filepath) -> float:
-    out = subprocess.run(
+    out = _run_process(
         [FFPROBE, "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", str(filepath)],
         capture_output=True, text=True,
@@ -43,7 +51,7 @@ def decode(filepath, sr: int, offset: float = 0.0, duration: float | None = None
         cmd += ["-t", f"{duration:.3f}"]
     cmd += ["-f", "f32le", "-acodec", "pcm_f32le", "-ac", "1", "-ar", str(sr), "-"]
 
-    out = subprocess.run(cmd, capture_output=True)
+    out = _run_process(cmd, capture_output=True)
     if out.returncode != 0:
         raise RuntimeError(f"ffmpeg failed on {filepath}: {out.stderr.decode(errors='replace')[:300]}")
     return np.frombuffer(out.stdout, dtype=np.float32)
@@ -78,6 +86,50 @@ def windows(filepath, sr: int, window_s: float, max_windows: int) -> np.ndarray:
         chunk = audio[a : a + win_len]
         out[i, : chunk.size] = chunk
     return out
+
+
+def waveform(filepath, points: int = 1200) -> dict:
+    """Return a compact peak envelope suitable for drawing a timeline.
+
+    This is intentionally separate from model embedding: the UI can request a
+    fast, low-resolution preview without loading an encoder or changing the
+    tagger's training data.
+    """
+    points = max(64, min(int(points), 4000))
+    duration = duration_seconds(filepath)
+    if duration <= 0:
+        return {"duration": 0.0, "peaks": []}
+
+    # A modest sample rate keeps preview generation cheap while retaining the
+    # transient shape editors need to identify hits and transitions.
+    sr = 8000
+    samples = decode(filepath, sr)
+    if samples.size == 0:
+        return {"duration": duration, "peaks": []}
+
+    count = min(points, samples.size)
+    peaks = np.zeros(count, dtype=np.float32)
+    edges = np.linspace(0, samples.size, count + 1, dtype=np.int64)
+    absolute = np.abs(samples)
+    for i in range(count):
+        start, end = int(edges[i]), int(edges[i + 1])
+        if end > start:
+            peaks[i] = float(absolute[start:end].max())
+    scale = float(np.quantile(peaks, 0.995)) if np.any(peaks) else 1.0
+    if scale <= 0:
+        scale = 1.0
+    return {"duration": duration, "peaks": np.clip(peaks / scale, 0, 1).round(4).tolist()}
+
+
+def export_clip(filepath, start: float, end: float, destination) -> None:
+    """Render a universally importable WAV excerpt for external-editor drag-out."""
+    length = max(0.05, end - start)
+    cmd = [FFMPEG, "-v", "error", "-nostdin", "-y", "-ss", f"{start:.3f}",
+           "-i", str(filepath), "-t", f"{length:.3f}", "-vn", "-acodec", "pcm_s16le",
+           str(destination)]
+    out = _run_process(cmd, capture_output=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"ffmpeg could not render selection: {out.stderr.decode(errors='replace')[:300]}")
 
 
 def find_audio(folder, exts, recursive: bool = True,

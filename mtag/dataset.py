@@ -35,6 +35,14 @@ class EmbeddingCache:
         p = self.dir / f"{_key(filepath)}.npy"
         return np.load(p) if p.exists() else None
 
+    def has(self, filepath: Path) -> bool:
+        """Whether it is cached, without reading it.
+
+        Planning a run asks this of every path for every part of the fusion, and
+        `get` would load and throw away thousands of arrays to answer it.
+        """
+        return (self.dir / f"{_key(filepath)}.npy").exists()
+
     def put(self, filepath: Path, vec: np.ndarray) -> None:
         np.save(self.dir / f"{_key(filepath)}.npy", vec.astype(np.float32))
 
