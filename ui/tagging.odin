@@ -363,7 +363,33 @@ apply_guessed_games :: proc() -> (tagged: int, folders: int, created: int) {
 
 // ── drawing ─────────────────────────────────────────────────────────────────
 
-draw_tagging :: proc(r: Rect) {
+draw_tagging :: proc(bounds: Rect) {
+    if !ui.held { selection_paint.active = false }
+    defer { selection_paint.previous_y = ui.mouse.y }
+    r := bounds
+    x, header_y := r.x + px(PAD), r.y + px(5)
+    widths := [4]f32{120,120,160,155}
+    labels := [4]cstring{"Add folder", "Refresh library", "Assign missing moods", "Centralize imports"}
+    for width, action in widths {
+        w := px(width)
+        if x > r.x + px(PAD) && x + w > r.x + r.width - px(PAD) { x = r.x + px(PAD); header_y += px(34) }
+        enabled := !scan.running && !folder_copy.running
+        if action == 2 { enabled = enabled && job.phase != .Running && job.phase != .Loading }
+        if action == 3 { enabled = enabled && len(imported_folders) > 0 }
+        if button(rect(x,header_y,w,px(28)), labels[action], .Ghost, enabled) {
+            switch action {
+            case 0: open_tag_editor(.Add_Folder, "", "")
+            case 1: start_scan(lib.root, app.recursive, app.include_sfx)
+            case 2: assign_missing_moods()
+            case 3:
+                for path in imported_folders { if !path_under_root(lib.root, path) { append(&import_folder_queue, Folder_Import{strings.clone(path), false}) } }
+            }
+        }
+        x += w + px(10)
+    }
+    header_h := header_y + px(33) - r.y
+    r.y += header_h
+    r.height -= header_h
 	fill(r, BG)
 	if !lib.scanned {
 		centred_note(r, "Import a folder to start tagging.")
@@ -522,7 +548,12 @@ draw_tagging :: proc(r: Rect) {
 		}
 		// The folder's box takes everything with it; clicking the row does the
 		// same, since that is what the whole line reads as.
-		if clicked_in(line) { set_folder_picked(row, !all_picked) }
+		if paint_checkbox(box, line, all_picked) { set_folder_picked(row, selection_paint.value) }
+		if right_clicked_in(line) && len(row.tracks) > 0 {
+            if picked == 0 { set_folder_picked(row, true) }
+            open_tagging_menu(row.tracks[0])
+        }
+		if !selection_paint.active && clicked_in(line) { set_folder_picked(row, !all_picked) }
 		y += row_h
 
 		if row.expanded {
@@ -539,6 +570,7 @@ draw_tagging :: proc(r: Rect) {
 // whether that has been written yet.
 @(private)
 draw_tagging_file :: proc(r: Rect, index: int, name_x: f32, picked: ^bool) {
+	tag_drop_target(r, index)
 	t := &lib.tracks[index]
 	over := hovered(r)
 	selected := app.selected == index
@@ -554,10 +586,11 @@ draw_tagging_file :: proc(r: Rect, index: int, name_x: f32, picked: ^bool) {
 	fill_round(box, picked^ ? ACCENT : PANEL_2, 2)
 	if !picked^ { outline_round(box, LINE, 2) }
 	if picked^  { draw_icon(.Check, box, rl.Color{6, 20, 28, 255}) }
-	if clicked_in(box) {
-		picked^ = !picked^
-		return
-	}
+	if paint_checkbox(box, r, picked^) { picked^ = selection_paint.value }
+    if right_clicked_in(r) {
+        if !picked^ { for &row in tagging.rows { set_folder_picked(&row, false) }; picked^ = true }
+        open_tagging_menu(index)
+    }
 
 	// A dot for the state: changed and unsaved, saved, or untouched.
 	dot := rect(name_x + px(34), r.y + r.height * 0.5 - px(3), px(6), px(6))
@@ -594,7 +627,7 @@ draw_tagging_file :: proc(r: Rect, index: int, name_x: f32, picked: ^bool) {
 		}
 	}
 
-	if clicked_in(r) {
+	if !selection_paint.active && clicked_in(r) {
 		app.selected = index
 		if app.inspector_auto { app.inspector = true }
 		play_track(index)
@@ -721,8 +754,8 @@ draw_tagging_actions :: proc(r: Rect) {
 		picked_tracks(&picked)
 		filable = filing_candidates(picked[:])
 	}
-	file_label: cstring = "File into mood folders"
-	if filable > 0 { file_label = fmt.ctprintf("File %d into mood folders", filable) }
+	file_label: cstring = "File into library folders"
+	if filable > 0 { file_label = fmt.ctprintf("File %d into library folders", filable) }
 	fw := text_w(.Regular, file_label, FS_BODY) + px(24)
 	if button(rect(x, game_y, fw, px(30)), file_label, .Normal,
 	          filable > 0 && !filing_busy()) {
@@ -802,4 +835,55 @@ draw_tagging_actions :: proc(r: Rect) {
 		sw := text_w(.Regular, summary, FS_SMALL)
 		draw_text_mid(.Regular, summary, rx - sw, right_y - px(6), px(42), FS_SMALL, TEXT_DIM)
 	}
+}
+
+selection_paint: struct { active, value: bool, previous_y: f32 }
+paint_checkbox :: proc(box, row: Rect, selected: bool) -> bool {
+    if clicked_in(box) {
+        selection_paint.previous_y = ui.mouse.y
+        selection_paint.active = true
+        selection_paint.value = !selected
+        ui.captured = &selection_paint
+        return true
+    }
+    if selection_paint.active && ui.held && !ui.modal_open &&
+       ui.mouse.x >= row.x && ui.mouse.x <= row.x + row.width &&
+       max(ui.mouse.y, selection_paint.previous_y) >= row.y && min(ui.mouse.y, selection_paint.previous_y) <= row.y + row.height {
+        if ui.clip_count > 0 {
+            clip := ui.clips[ui.clip_count-1]
+            if row.y + row.height < clip.y || row.y > clip.y + clip.height { return false }
+        }
+        return true
+    }
+    return false
+}
+open_tagging_menu :: proc(index: int) {
+    clear(&app.selection)
+    picked_tracks(&app.selection)
+    app.selected = index
+    open_context_menu(&app.track_menu, index)
+}
+reassign_media_kind :: proc(effects: bool) {
+    if folder_copy.running || scan.running || filing_busy() || job.phase == .Running || job.phase == .Loading { toast("Finish the current job before changing media type"); return }
+    failed := 0
+    targets := make([dynamic]int, 0, 8, context.temp_allocator)
+    for index in tag_targets() {
+        t := &lib.tracks[index]
+        kind := effects ? "sfx" : "music"
+        if e := write_track_tags(t.path, t.tags[:], t.cues[:], kind); e != "" { failed += 1; continue }
+        t.media_kind = kind
+        t.is_sfx = effects
+        t.dirty = false
+        t.cues_dirty = false
+        t.saved = true
+        sidecar_saves += 1
+        append(&targets, index)
+    }
+    invalidate_dirty_count()
+    search.dirty = true
+    nodes.built = false
+    invalidate_tagging()
+    save_library_snapshot()
+    if len(targets) > 0 { start_filing_plan(targets[:]) }
+    toast(failed > 0 ? fmt.tprintf("%d sidecars could not be saved; those files kept their type", failed) : "Media type saved; preparing the folder move preview.")
 }

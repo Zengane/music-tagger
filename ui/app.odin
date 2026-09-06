@@ -108,7 +108,7 @@ App :: struct {
 
 Editor_Mode :: enum {
 	New_Tag, Rename, Confirm_Delete, Confirm_Track_Delete, New_Group, Edit_Game, Set_Game, Set_Color,
-	Add_Library, Rename_Library, Relocate_Library, Confirm_Filing,
+	Edit_Marker, Add_Library, Add_Folder, Rename_Library, Relocate_Library, Confirm_Filing,
 }
 
 app: App = {
@@ -145,6 +145,8 @@ toast :: proc(message: string) {
 library_runes :: proc() -> []rune {
 	set: map[rune]bool
 	defer delete(set)
+	for g in tag_groups { for tag in g.tags { runes_of(tag, &set) } }
+	runes_of(field_string(&app.editor_field), &set)
 	for &t in lib.tracks {
 		runes_of(t.rel, &set)
 		for tag in t.tags { runes_of(tag, &set) }
@@ -157,6 +159,7 @@ library_runes :: proc() -> []rune {
 // ── main ────────────────────────────────────────────────────────────────────
 
 main :: proc() {
+    if len(os.args) > 2 && os.args[1] == "--cachecheck" { os.exit(run_cache_check(os.args[2])) }
 	// `--selftest [folder]` checks the file-facing code without a window, so
 	// the sidecar and scan behaviour can be verified in a terminal or CI.
 	if len(os.args) > 1 && os.args[1] == "--selftest-pipe" {
@@ -179,6 +182,9 @@ main :: proc() {
 	}
 	if len(os.args) > 1 && os.args[1] == "--filingcheck" {
 		os.exit(run_filing_check(len(os.args) > 2 ? os.args[2] : ""))
+	}
+	if len(os.args) > 1 && os.args[1] == "--audiocheck" {
+		os.exit(run_audio_check(len(os.args) > 2 ? os.args[2] : ""))
 	}
 	if len(os.args) > 1 && os.args[1] == "--prefill" {
 		os.exit(run_prefill_report(len(os.args) > 2 ? os.args[2] : ""))
@@ -213,6 +219,8 @@ main :: proc() {
 		os.exit(run_selftest(folder, os.args[1] == "--selftest-model"))
 	}
 
+	if len(os.args) > 1 && os.args[1] == "--review-ui" { os.exit(run_review_ui()) }
+
 	// Undecorated, because the caption bar is drawn by this program — see
 	// titlebar.odin, which also puts the resizing frame back.
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_HIGHDPI,
@@ -242,7 +250,7 @@ main :: proc() {
 	browse.recursive = true
 
 	init_tag_library()
-	build_fonts(nil)
+	build_fonts(library_runes())
 	// Draws while the window's edge is being dragged; see liveresize.odin.
 	init_titlebar()
 	install_live_resize()
@@ -259,31 +267,39 @@ main :: proc() {
 	// Straight into the library that was open last, rather than an empty
 	// window and an import every time.
 	open_last_library()
+	defer save_library_snapshot()
+	defer cancel_analyze()
+	defer stop_split()
+	defer stop_folder_copy()
 
 	// `app.quit` is the title bar's close button. raylib's own close flag still
 	// works — Alt+F4 and the taskbar go through it.
 	for !rl.WindowShouldClose() && !app.quit {
 		free_all(context.temp_allocator)
+		if fonts_dirty { build_fonts(library_runes()); fonts_dirty = false }
+		rl.SetTargetFPS(rl.IsWindowMinimized() || !rl.IsWindowFocused() ? 15 : 60)
 
 		if poll_scan() {
 			clear_grid_cache()
-			load_all_features()
 			build_fonts(library_runes())
 			search.dirty = true
 			app.selected = -1
-			toast(fmt.tprintf("%d files imported", len(lib.tracks)))
+			if scan.err == "" { toast(fmt.tprintf("%d files imported", len(lib.tracks))) }
 		}
 			poll_job()
 			poll_filing()
 		poll_music_map()
+		poll_split()
 		// The warm-up finishing is when the rest of the features appear.
 		if _, _, warming := waveform_warmup(); !warming && features_pending {
 			features_pending = false
 			load_all_features()
+			save_library_snapshot()
 			search.dirty = true
 		}
 		update_audio()
 		handle_dropped_files()
+		poll_folder_imports()
 
 		if search.dirty {
 			rebuild_view()
@@ -299,6 +315,7 @@ main :: proc() {
 		rl.BeginDrawing()
 		rl.ClearBackground(BG)
 		draw_app()
+		finish_tag_drag()
 		rl.EndDrawing()
 		end_ui()
 		end_main_frame()
@@ -332,10 +349,11 @@ handle_dropped_files :: proc() {
 	// A folder is an import. Anything else is a file, and what to do with a
 	// file depends on where it came from.
 	if os.is_dir(path) {
-		index := add_library(path)
-		field_set(&app.folder, path)
-		open_library(index)
-		toast(fmt.tprintf("%s added", path_leaf(path)))
+		for i in 0 ..< int(dropped.count) {
+			folder := string(dropped.paths[i])
+			if os.is_dir(folder) { queue_folder_import(folder) }
+		}
+		toast("folders queued for import")
 		return
 	}
 
@@ -531,7 +549,7 @@ draw_app :: proc() {
 		end_modal()
 	}
 
-	draw_activity(rect(0, top.height, W, px(2)))
+	draw_activity(rect(0, top.y + top.height - px(2), W, px(2)))
 	draw_toast(rect(rail.width + px(PAD), top.height + px(PAD), list.width, px(24)))
 }
 
@@ -541,10 +559,13 @@ draw_app :: proc() {
 @(private)
 draw_activity :: proc(r: Rect) {
 	progress: f32 = -1
+    if folder_copy.running { progress = folder_copy.total > 0 ? f32(folder_copy.done)/f32(folder_copy.total) : -2 }
 	col := ACCENT
 
 	if scan.running {
 		// A scan has no known total, so it pulses rather than filling.
+		progress = -2
+	} else if split_job.running {
 		progress = -2
 	} else if job.phase == .Loading {
 		progress = -2
@@ -826,6 +847,7 @@ set_view :: proc(mode: View_Mode) {
 
 @(private)
 status_summary :: proc() -> cstring {
+	if folder_copy.running { return fmt.ctprintf("copying into library: %d / %d", folder_copy.done, folder_copy.total) }
 	if scan.running { return fmt.ctprintf("scanning… %d found", scan_progress()) }
 	if done, total, running := waveform_warmup(); running && total > 0 {
 		return fmt.ctprintf("waveforms %d / %d", done, total)
@@ -1215,17 +1237,20 @@ draw_rail :: proc(r: Rect) {
 			}
 
 			label_w := right - row.x - px(24)
+			label := tag
 			if g.kind == .Favorite {
-				draw_icon(.Star, rect(row.x + px(22), row.y, px(14), row.height), FAV_C)
-				draw_text_mid(.Regular, "favourite", row.x + px(40), row.y, row.height,
-				              FS_SMALL, filtering ? TEXT : TEXT_DIM)
-			} else {
-				draw_text_mid(.Regular, elide_right(tag, label_w, FS_SMALL),
-				              row.x + px(22), row.y, row.height, FS_SMALL,
-				              filtering ? TEXT : TEXT_DIM)
+				switch tag {
+				case "⭐": label = "⭐ Star"
+				case "★": label = "★ Solid star"
+				case "🌟": label = "🌟 Glowing star"
+				case "☆": label = "☆ Outline star"
+				}
 			}
+			draw_text_mid(.Regular, elide_right(label, label_w, FS_SMALL),
+                row.x + px(22), row.y, row.height, FS_SMALL,
+                filtering ? TEXT : TEXT_DIM)
 
-			if clicked_in(row) {
+			if rail_tag_click(row, tag) {
 				// A plain click *replaces* the query: browsing for a tag is
 				// nearly always a fresh question, and having to clear the last
 				// one first made the rail tedious. Ctrl adds to the query and
@@ -1268,7 +1293,7 @@ draw_rail :: proc(r: Rect) {
 			              filtering ? TEXT : TEXT_FAINT)
 			draw_text_mid(.Regular, count_label, row.x + row.width - count_w - px(8),
 			              row.y, row.height, FS_SMALL, TEXT_FAINT)
-			if clicked_in(row) {
+			if rail_tag_click(row, tag) {
 				if idx := chip_index(tag); idx >= 0 { remove_chip(idx) } else { add_chip(tag) }
 			}
 			y += px(23)
@@ -1469,7 +1494,7 @@ draw_tag_editor :: proc(screen: Rect) {
 	case .Confirm_Filing:
 		// Four destinations at most are listed; the rest are summed up.
 		h = px(250) + f32(min(len(filing_destinations()), 4)) * px(22)
-	case .New_Tag, .Rename, .Edit_Game, .Add_Library, .Rename_Library, .Relocate_Library:
+	case .Edit_Marker, .New_Tag, .Rename, .Edit_Game, .Add_Library, .Add_Folder, .Rename_Library, .Relocate_Library:
 	}
 	h = min(h, screen.height - px(80))
 
@@ -1506,6 +1531,8 @@ draw_tag_editor :: proc(screen: Rect) {
 			title = fmt.ctprintf("Delete %d files?", app.delete_targets)
 		}
 	case .Set_Color:        title = fmt.ctprintf("Colour for %s", app.editor_target)
+	case .Edit_Marker:      title = "Name this marker"
+	case .Add_Folder:       title = "Add a soundtrack folder"
 	case .Add_Library:      title = "Add a library"
 	case .Rename_Library:   title = "Rename this library"
 	case .Relocate_Library: title = "Where is this library now?"
@@ -1622,6 +1649,8 @@ draw_tag_editor :: proc(screen: Rect) {
 		hint: cstring = "No spaces — the search box treats them as separate words."
 		if app.editor_mode == .New_Group { hint = "A name for the group." }
 		switch app.editor_mode {
+		case .Edit_Marker:      hint = "Drag the flag to move it. Remove markers in the inspector."
+		case .Add_Folder:       hint = "Paste a folder path, or drag folders onto the window."
 		case .Add_Library:      hint = "The full path to the folder, or drop it on the window."
 		case .Rename_Library:   hint = "Only the name in the sidebar changes; nothing on disk does."
 		case .Relocate_Library: hint = "The full path to where the folder is now."
@@ -1670,8 +1699,9 @@ draw_tag_editor :: proc(screen: Rect) {
 			confirm = fmt.ctprintf("Set on %d files", len(tagging.rows[app.editor_row].tracks))
 		}
 	}
+		if app.editor_mode == .Edit_Marker { confirm = "Apply" }
 		if app.editor_mode == .Set_Game        { confirm = "Apply" }
-		if app.editor_mode == .Add_Library     { confirm = "Add" }
+		if app.editor_mode == .Add_Library || app.editor_mode == .Add_Folder { confirm = "Add" }
 		if app.editor_mode == .Rename_Library  { confirm = "Rename" }
 		if app.editor_mode == .Relocate_Library { confirm = "Use this folder" }
 		if button(rect(x, y, px(130), px(32)), confirm, .Primary) || enter_pressed() {
@@ -1754,6 +1784,21 @@ apply_tag_editor :: proc() {
 	case .Set_Game:
 		apply_game_tag(strings.trim_space(name))
 
+	case .Edit_Marker:
+		if !has_visible_text(name) { app.editor_error = "Give the marker a name"; return }
+		if marker_track >= 0 && marker_track < len(lib.tracks) {
+			t := &lib.tracks[marker_track]
+			if marker_edit >= 0 && marker_edit < len(t.cues) {
+				t.cues[marker_edit].name = strings.clone(name, lib_allocator())
+				mark_cues_dirty(t)
+			}
+		}
+		close_tag_editor()
+	case .Add_Folder:
+		path := strings.trim_space(name)
+		if !os.is_dir(path) { app.editor_error = "that folder does not exist"; return }
+		queue_folder_import(path)
+		close_tag_editor()
 	case .Add_Library:
 		path := strings.trim_space(name)
 		if !os.is_dir(path) {
@@ -2123,6 +2168,7 @@ draw_list :: proc(r: Rect) {
 		t := &lib.tracks[index]
 		y := body.y + row_h * f32(vi) - app.list_scroll.offset
 		row := rect(body.x, y, body.width, row_h)
+		tag_drop_target(row, index)
 
 		selected := app.selected == index || slice.contains(app.selection[:], index)
 		over := hovered(row)
@@ -2348,6 +2394,7 @@ draw_inspector :: proc(r: Rect) {
 	fill(r, PANEL)
 	if app.selected < 0 || app.selected >= len(lib.tracks) { return }
 	t := &lib.tracks[app.selected]
+	tag_drop_target(r, app.selected)
 
 	begin_clip(r)
 	defer end_clip()
@@ -2384,6 +2431,7 @@ draw_inspector :: proc(r: Rect) {
 	hline(x, y, w)
 	y += px(14)
 
+	y = draw_marker_controls(t, x, y, w)
 	// Tags on the file. Clicking one removes it.
 	section_label(x, y, "TAGS ON THIS FILE")
 	y += px(18)
@@ -2460,7 +2508,7 @@ draw_inspector :: proc(r: Rect) {
 	if t.is_sfx {
 		guesses: [dynamic]string
 		guesses.allocator = context.temp_allocator
-		suggest_sfx_tags(t.name, &guesses)
+		suggest_track_sfx_tags(t, &guesses)
 
 		missing := make([dynamic]string, 0, 4, context.temp_allocator)
 		for g in guesses {
@@ -2559,7 +2607,7 @@ draw_tag_palette :: proc(t: ^Track, x, y, w: f32) -> f32 {
 	wanted := t.is_sfx ? Group_Scope.Effects : Group_Scope.Music
 
 	for &g in tag_groups {
-		if g.scope != wanted { continue }
+		if g.scope != wanted && g.scope != .Both { continue }
 		for tag in g.tags {
 			label := strings.clone_to_cstring(tag, context.temp_allocator)
 			tw := text_w(.Regular, label, FS_SMALL)
@@ -2625,7 +2673,6 @@ draw_scores :: proc(t: ^Track, x, y, w: f32) -> f32 {
 	cy := y
 	shown := 0
 	for s in t.scores {
-		if shown >= 12 && s.score < s.threshold { break }
 		shown += 1
 
 		row := rect(x, cy, w, px(20))
@@ -2666,11 +2713,29 @@ draw_scores :: proc(t: ^Track, x, y, w: f32) -> f32 {
 
 @(private)
 inspector_content_height :: proc(t: ^Track) -> f32 {
-	h := px(PAD) + px(22 + 20 + 24 + 14 + 18)
-	h += len(t.tags) == 0 ? px(20) : px(28) * f32(1 + len(t.tags) / 6)
-	h += px(18) + px(26) * (t.is_sfx ? 2 : 4) + px(10 + 14 + 18)
-	h += t.scored ? px(20) * f32(min(len(t.scores), 16)) : px(60)
-	return h + px(60)
+	w := max(px(40), px(app.inspect_w) - px((PAD + 2) * 2) - px(16))
+	h := px(290) + px(28) * f32(len(t.cues))
+	cx: f32
+	for tag in t.tags {
+		bw := text_w(.Regular, strings.clone_to_cstring(tag, context.temp_allocator), FS_SMALL) + px(28)
+		if cx + bw > w { h += px(24); cx = 0 }
+		cx += bw + px(4)
+	}
+	wanted := t.is_sfx ? Group_Scope.Effects : Group_Scope.Music
+	for &g in tag_groups {
+		if g.scope != wanted && g.scope != .Both { continue }
+		cx = 0
+		for tag in g.tags {
+			slot := t.is_sfx ? quick_slot(tag) : -1
+			bw := text_w(.Regular, strings.clone_to_cstring(tag, context.temp_allocator), FS_SMALL) + px(16) + (slot >= 0 ? px(15) : 0)
+			if cx + bw > w { h += px(24); cx = 0 }
+			cx += bw + px(4)
+		}
+		h += px(28)
+	}
+	h += t.scored ? px(20) * f32(len(t.scores)) : px(120)
+	if t.is_sfx { h += px(560) }
+	return h + px(120)
 }
 
 // ── player dock ─────────────────────────────────────────────────────────────
@@ -2775,7 +2840,7 @@ draw_dock :: proc(r: Rect) {
 		if player.track >= 0 && player.track < len(lib.tracks) {
 			send := rect(rx - bs, by, bs, bs)
 			if hovered(send) { fill_round(send, PANEL_3, 6); ui.hover_cursor = .POINTING_HAND }
-			outline_round(send, ACCENT, 6)
+			fill_round(send, ACCENT_DK, 5)
 			// An arrow going into a tray: this puts the selection somewhere
 			// else. The drag toggle beside it used the same share icon, and
 			// two different things wearing one picture is worse than either
@@ -2794,7 +2859,7 @@ draw_dock :: proc(r: Rect) {
 		// Export: write it out as its own file.
 		export := rect(rx - bs, by, bs, bs)
 		if hovered(export) { fill_round(export, PANEL_3, 6); ui.hover_cursor = .POINTING_HAND }
-		outline_round(export, LINE, 6)
+
 		draw_icon(.Export, export, TEXT_DIM)
 		tip(export, fmt.tprintf("Render this %s out as its own audio file",
 		                        fmt_time(player.sel_end - player.sel_start)))
@@ -2812,7 +2877,7 @@ draw_dock :: proc(r: Rect) {
 		half := px(30)
 		mb := rect(rx - half * 2, by, half * 2, bs)
 		fill_round(mb, PANEL, 6)
-		outline_round(mb, LINE, 6)
+
 
 		on := app.drag_as_range
 		lit := rect(on ? mb.x + px(1) : mb.x + half, mb.y + px(1), half - px(1), mb.height - px(2))
@@ -3013,7 +3078,9 @@ handle_keys :: proc() {
 		prefs.inspector_auto = app.inspector
 		save_prefs()
 	}
-	if rl.IsKeyPressed(.M) { set_view(app.view == .Map ? .List : .Map) }
+	if rl.IsKeyPressed(.M) {
+		if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) { set_view(app.view == .Map ? .List : .Map) } else { add_playhead_marker() }
+	}
 	if rl.IsKeyPressed(.V) { set_view(app.view == .Grid ? .List : .Grid) }
 	if rl.IsKeyPressed(.T) { set_view(app.view == .Tag ? .List : .Tag) }
 	if rl.IsKeyPressed(.G)   { apply_filename_guess() }
@@ -3180,15 +3247,19 @@ draw_track_menu :: proc() {
 	// Always appended, even for effects, because the cases below are matched by
 	// position: an item that is sometimes absent silently renumbers everything
 	// after it. Effects say why they cannot be filed when it is chosen.
-	file_label: cstring = "File into its mood folder"
-	if many { file_label = fmt.ctprintf("File %d into mood folders", len(app.selection)) }
+	file_label: cstring = "File into its library folder"
+	if many { file_label = fmt.ctprintf("File %d into library folders", len(app.selection)) }
 	append(&items, file_label)
 	append(&items, "Clear tags")
 	append(&items, count_dirty() > 0 ? "Save changed sidecars" : "Save sidecar")
 	append(&items, "Send to Premiere")
 	append(&items, many ? fmt.ctprintf("Delete %d files", len(app.selection)) : "Delete file")
+	append(&items, "Move to SFX")
+	append(&items, "Move to Music")
 
 	switch context_menu(&app.track_menu, items[:]) {
+	case 12: reassign_media_kind(true)
+	case 13: reassign_media_kind(false)
 	case 0:
 		play_track(subject)
 
@@ -3237,15 +3308,7 @@ draw_track_menu :: proc() {
 	case 7:
 		targets := make([dynamic]int, 0, 8, context.temp_allocator)
 		append(&targets, ..tag_targets())
-		music := make([dynamic]int, 0, len(targets), context.temp_allocator)
-		for index in targets {
-			if !lib.tracks[index].is_sfx { append(&music, index) }
-		}
-		if len(music) == 0 {
-			toast("effects are filed by kind, not by mood")
-		} else {
-			start_filing_plan(music[:])
-		}
+		start_filing_plan(targets[:])
 
 	case 8:
 		undo_begin()

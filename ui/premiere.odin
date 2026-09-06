@@ -319,6 +319,13 @@ swap_in_premiere :: proc(t: ^Track, placeholder: string, from, to: f32, mark: f3
 // reason for the marker.
 mark_for_range :: proc(t: ^Track, from, to: f32) -> f32 {
 	if to <= from { return -1 }
+	if len(t.cues) > 0 {
+		best: f32 = -1
+		for cue in t.cues {
+			if cue.at >= from && cue.at <= to && (best < 0 || cue.at < best) { best = cue.at }
+		}
+		return best
+	}
 
 	f := t.features
 	if !f.valid { return -1 }

@@ -147,17 +147,24 @@ write_range_xml :: proc(t: ^Track, from, to: f32, mark := true) -> (string, bool
 	// Marker positions are relative to the clip, so the in point comes off
 	// the hit. A hit outside the selected range is left out rather than
 	// clamped to an edge, where it would be wrong and look deliberate.
-	if mark && t.features.valid && t.features.hit >= from && t.features.hit <= to {
-		hit_frames := seconds_to_frames(t.features.hit) - in_frames
-		if hit_frames >= 0 && hit_frames <= length {
-			strings.write_string(&b, "            <marker>\n")
-			strings.write_string(&b, "              <name>hit</name>\n")
-			strings.write_string(&b, "              <comment>loudest point</comment>\n")
-			fmt.sbprintf(&b, "              <in>%d</in>\n", hit_frames)
-			strings.write_string(&b, "              <out>-1</out>\n")
-			strings.write_string(&b, "            </marker>\n")
-		}
-	}
+	if mark {
+        cues := make([dynamic]Cue, 0, len(t.cues) + 1, context.temp_allocator)
+        append(&cues, ..t.cues[:])
+        if len(cues) == 0 {
+            at := mark_for_range(t, from, to)
+            if at >= 0 { append(&cues, Cue{at, t.is_sfx ? "hit" : "swell"}) }
+        }
+        for cue in cues {
+            if cue.at < from || cue.at > to { continue }
+            hit_frames := seconds_to_frames(cue.at) - in_frames
+            if hit_frames < 0 || hit_frames > length { continue }
+            strings.write_string(&b, "            <marker><name>")
+            write_xml_text(&b, cue.name)
+            strings.write_string(&b, "</name>\n")
+            fmt.sbprintf(&b, "              <in>%d</in><out>-1</out>\n", hit_frames)
+            strings.write_string(&b, "            </marker>\n")
+        }
+    }
 
 	strings.write_string(&b, "          </clipitem>\n")
 	strings.write_string(&b, "        </track>\n")

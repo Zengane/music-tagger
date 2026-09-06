@@ -14,3 +14,7 @@ build/
 MusicTagger.exe
 mtag-test.exe
 dist/
+
+# Local validation artifacts
+mtag-review.exe
+work/

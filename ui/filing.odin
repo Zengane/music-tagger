@@ -97,8 +97,8 @@ collect_moves :: proc(indices: []int, allocator := context.temp_allocator) -> []
 	for index in indices {
 		if index < 0 || index >= len(lib.tracks) { continue }
 		t := &lib.tracks[index]
-		if t.is_sfx { continue } // effects are filed by kind, not by mood
-		mood := primary_mood_of(t)
+		mood := t.is_sfx ? sfx_filing_folder(t) : primary_mood_of(t)
+		if mood == "" && t.media_kind == "music" { mood = "Untagged" }
 		if mood == "" { continue }
 		append(&out, fmt.aprintf("%s\t%s", mood, t.path, allocator = allocator))
 	}
@@ -115,11 +115,12 @@ filing_candidates :: proc(indices: []int) -> int {
 
 // Asks what filing `indices` would do. Moves nothing.
 start_filing_plan :: proc(indices: []int) {
+    if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if filing_busy() { return }
 
 	lines := collect_moves(indices)
 	if len(lines) == 0 {
-		toast("nothing to file: these tracks have no mood tag")
+		toast("nothing to file: these tracks have no filing category")
 		return
 	}
 
@@ -143,6 +144,7 @@ start_filing_plan :: proc(indices: []int) {
 
 // Carries out the plan that is already in hand.
 start_filing_apply :: proc() {
+    if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if filing.phase != .Ready { return }
 	if !filing_spawn("--apply") { return }
 	filing.phase = .Moving
@@ -221,7 +223,7 @@ finish_filing :: proc() {
 		// anything that changes the files.
 		if filing.moved > 0 {
 			start_scan(lib.root, app.recursive, app.include_sfx)
-			toast(fmt.tprintf("filed %d tracks into their mood folders", filing.moved))
+			toast(fmt.tprintf("filed %d tracks into their library folders", filing.moved))
 		} else {
 			toast("nothing moved")
 		}
@@ -341,4 +343,27 @@ filing_destinations :: proc(allocator := context.temp_allocator) -> []Filing_Des
 		}
 	}
 	return out[:]
+}
+
+
+sfx_filing_folder :: proc(t: ^Track) -> string {
+    tags := t.tags[:]
+    guessed := make([dynamic]string, 0, 8, context.temp_allocator)
+
+    for tag in tags { for intent in SFX_INTENT_TAGS { if tag == intent { return "SFX/Interface" } } }
+    choices := [?][2]string{
+        {"Interface", "Interface"}, {"Footstep", "Footsteps"}, {"Weapon", "Weapons"},
+        {"Vehicle", "Vehicles"}, {"Creature", "Creatures"}, {"Voice", "Voice"},
+        {"Mechanical", "Mechanical"}, {"Magic", "Magic"}, {"Nature", "Nature"},
+        {"Liquid", "Liquid"}, {"Fire", "Fire"}, {"Electricity", "Electricity"},
+        {"Musical", "Musical"}, {"Foley", "Foley"}, {"Ambience", "Ambience"},
+        {"Drone", "Ambience"}, {"Riser", "Transitions"}, {"Downlifter", "Transitions"},
+        {"Swell", "Transitions"}, {"Transition", "Transitions"}, {"Whoosh", "Transitions"},
+        {"Explosion", "Impacts"}, {"Break", "Impacts"}, {"Impact", "Impacts"}, {"Stab", "Impacts"},
+    }
+    for choice in choices { for tag in tags { if tag == choice[0] { return strings.concatenate({"SFX/", choice[1]}, context.temp_allocator) } } }
+    suggest_sfx_tags(t.name, &guessed)
+    if len(guessed) == 0 && t.features.valid { shape_tags(t.features, &guessed) }
+    for choice in choices { for tag in guessed { if tag == choice[0] { return strings.concatenate({"SFX/", choice[1]}, context.temp_allocator) } } }
+    return "SFX/Unsorted"
 }

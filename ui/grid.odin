@@ -183,6 +183,7 @@ draw_grid_bar :: proc(r: Rect) {
 
 @(private)
 draw_tile :: proc(r: Rect, track_index: int) {
+	tag_drop_target(r, track_index)
 	t := &lib.tracks[track_index]
 	selected := app.selected == track_index
 	playing  := player.track == track_index

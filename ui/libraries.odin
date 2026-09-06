@@ -173,6 +173,7 @@ remove_library :: proc(index: int) {
 }
 
 open_library :: proc(index: int) {
+    if folder_copy.running { toast("Wait for the folder copy to finish"); return }
 	if index < 0 || index >= len(libraries) { return }
 	path := libraries[index].path
 	if !os.is_dir(path) {
@@ -190,13 +191,12 @@ open_library :: proc(index: int) {
 open_last_library :: proc() {
 	target := last_library
 	if target == "" && len(libraries) > 0 { target = libraries[0].path }
-	if target == "" || !os.is_dir(target) { return }
-
-	if index := find_library(target); index >= 0 {
-		open_library(index)
-	} else {
-		start_scan(target, app.recursive, app.include_sfx)
+	if target == "" { return }
+	if load_library_snapshot(target) {
+		build_fonts(library_runes())
+		rebuild_view()
 	}
+	start_scan(target, app.recursive, app.include_sfx)
 }
 
 // Whether a path sits inside the library that is open. Used to tell a file

@@ -62,7 +62,7 @@ Map_Mode :: enum { Tags, Sound }
 // What the Sound map ended up placing by. Decided per build from what is on
 // screen, and shown to the user, because "these two are close together" means
 // two different things in the two cases.
-Map_Source :: enum { Measured, Model }
+Map_Source :: enum { Measured, Model, Semantic }
 
 Node_View :: struct {
 	anchors:  [dynamic]Node_Anchor,
@@ -81,6 +81,9 @@ Node_View :: struct {
 	zoom:     f32,
 	hover:    int, // index into dots, -1 for none
 	dragging: bool,
+	// Whether this pan was started with the middle button, so it ends when that
+	// button is released rather than when the left one is.
+	pan_middle: bool,
 	drag_from: rl.Vector2,
 	pan_from: rl.Vector2,
 }
@@ -132,7 +135,7 @@ build_node_layout :: proc() {
 	for &t in lib.tracks {
 		if !kind_allows(&t) { continue }
 		for tag in t.tags {
-			if tag_kind(tag) not_in MAP_KINDS { continue }
+			if tag_kind(tag) not_in MAP_KINDS || (!t.is_sfx && tag_kind(tag) == .SFX) { continue }
 			counts[tag] = counts[tag] + 1
 		}
 	}
@@ -179,9 +182,10 @@ build_cooccurrence :: proc() -> []f32 {
 	for a, i in nodes.anchors { index_of[a.tag] = i }
 
 	present := make([dynamic]int, 0, 16, context.temp_allocator)
-	for track_index in search.view {
+	for &t in lib.tracks {
+		if !kind_allows(&t) { continue }
 		clear(&present)
-		for tag in lib.tracks[track_index].tags {
+		for tag in t.tags {
 			if i, ok := index_of[tag]; ok { append(&present, i) }
 		}
 		for a in present {
@@ -456,6 +460,14 @@ draw_nodes :: proc(r: Rect) {
 	}
 
 	// The signposts.
+	//
+	// Biggest region first, and a label is dropped when it would sit on top of
+	// one already placed. The effects map names sixty-odd regions and drawing
+	// them all put words across words — which reads as clutter, not as a map.
+	// The largest families keep their labels and the crowded small ones give
+	// theirs up until you zoom in and the crowding goes away on its own.
+	taken := make([dynamic]Rect, 0, 32, context.temp_allocator)
+
 	for a in nodes.anchors {
 		p := to_screen(a.pos, centre, nodes.pan, nodes.zoom)
 		if p.x < r.x - 120 || p.x > r.x + r.width + 120 { continue }
@@ -483,6 +495,18 @@ draw_nodes :: proc(r: Rect) {
 		// thing the dot was for.
 		pad := px(8)
 		plate := rect(p.x - (lw + pad * 2) * 0.5, p.y - px(11), lw + pad * 2, px(22))
+
+		clash := false
+		for t in taken {
+			if plate.x < t.x + t.width && t.x < plate.x + plate.width &&
+			   plate.y < t.y + t.height && t.y < plate.y + plate.height {
+				clash = true
+				break
+			}
+		}
+		if clash { continue }
+		append(&taken, plate)
+
 		fill_round(plate, rl.Color{14, 17, 22, 242}, 5)
 		outline_round(plate, rl.Color{col.r, col.g, col.b, 170}, 5)
 		draw_text(.Bold, label, plate.x + pad, p.y - px(8), FS_BODY,
@@ -512,6 +536,15 @@ draw_nodes :: proc(r: Rect) {
 	// away the shape of the library — which is the thing the map is for. Left
 	// in and dimmed, they are the map you already know, with your search lit up
 	// on it.
+	// A dot small enough is drawn as a square.
+	//
+	// `DrawCircleV` builds a fan of about thirty-six triangles. At eight
+	// thousand effects that is a quarter of a million triangles a frame for the
+	// dimmed layer alone, and the window visibly stuttered whenever a search
+	// dimmed the map. Below about three pixels a circle and a square are the
+	// same handful of lit pixels, and a rectangle is two triangles.
+	tiny := radius < px(3.0)
+
 	for pass in 0 ..< 2 {
 		want_lit := pass == 1
 		for d, i in nodes.dots {
@@ -531,11 +564,20 @@ draw_nodes :: proc(r: Rect) {
 				col.r = u8(f32(col.r) * 0.30)
 				col.g = u8(f32(col.g) * 0.30)
 				col.b = u8(f32(col.b) * 0.30)
-				rl.DrawCircleV(p, radius * 0.8, col)
+				// The dimmed layer is the expensive one — it is nearly every
+				// dot on the map — and it is also the one nobody is reading in
+				// detail. It never gets the circle.
+				side := radius * 1.5
+				rl.DrawRectangleRec({p.x - side * 0.5, p.y - side * 0.5, side, side}, col)
 				continue
 			}
 
-			rl.DrawCircleV(p, selected ? radius * 2.1 : radius, col)
+			if tiny && !selected && !playing {
+				side := radius * 2
+				rl.DrawRectangleRec({p.x - side * 0.5, p.y - side * 0.5, side, side}, col)
+			} else {
+				rl.DrawCircleV(p, selected ? radius * 2.1 : radius, col)
+			}
 			// The family, as a ring. Only once the dot is big enough to hold
 			// one — below that it would just darken the colour it explains.
 			if ring && !selected && !playing {
@@ -606,6 +648,8 @@ draw_map_mode_switch :: proc(r: Rect) {
 	}
 	pick(x,          y, w, h, "Tags",  .Tags)
 	pick(x + w + px(4), y, w, h, "Sound", .Sound)
+    if button(rect(x+2*w+px(12),y,px(100),h),"Focus matches",.Ghost) { frame_nodes(r,true) }
+    if button(rect(x+2*w+px(118),y,px(80),h),"Show all",.Ghost) { frame_nodes(r) }
 
 	if nodes.mode != .Sound { return }
 	y += h + px(6)
@@ -613,9 +657,19 @@ draw_map_mode_switch :: proc(r: Rect) {
 	// What the positions mean, in the plainest words available.
 	caption: cstring = "placed by what was measured"
 	if nodes.source == .Model { caption = "placed by how the model hears them" }
+    if search.kind == .Effects {
+        caption = nodes.source == .Semantic ? "SFX audio similarity (CLAP)" : "Basic audio measurements - build the SFX sound map for audio similarity"
+    }
 	draw_text(.Regular, caption, x, y + px(3), FS_SMALL, TEXT_FAINT)
 	y += px(20)
 
+    if search.kind == .Effects {
+        if map_job.running {
+            draw_text(.Regular, strings.clone_to_cstring(map_job.detail,context.temp_allocator),x,y,FS_SMALL,ACCENT)
+            if button(rect(x,y+px(22),px(100),px(24)),"Stop mapping",.Ghost) { stream_kill(&map_job.stream); stream_close(&map_job.stream); map_job.running=false; toast("Mapping stopped; completed audio analysis is cached") }
+        } else if button(rect(x,y,px(180),px(24)),"Build / update SFX sound map",.Ghost) { start_sfx_map() }
+        return
+    }
 	// Music needs the model's layout, and the model's layout has to be built
 	// once. Offering it here rather than in settings because here is where you
 	// find out you need it.
@@ -651,7 +705,10 @@ handle_node_camera :: proc(r: Rect) {
 	// Zoom towards the pointer, so the thing you are aiming at stays put.
 	if wheel := ui.wheel; wheel != 0 {
 		before := nodes.zoom
-		nodes.zoom = clamp(nodes.zoom * (wheel > 0 ? 1.14 : 1 / 1.14), 0.12, 8)
+		// Down to 0.04, not 0.12. Eight thousand effects spread far wider than
+		// a thousand tracks, and the old floor could not fit them on screen at
+		// once — there was no view that showed the whole shape of the library.
+		nodes.zoom = clamp(nodes.zoom * (wheel > 0 ? 1.14 : 1 / 1.14), 0.04, 8)
 		centre := rl.Vector2{r.x + r.width * 0.5, r.y + r.height * 0.5}
 		mx := (ui.mouse.x - centre.x) / before - nodes.pan.x
 		my := (ui.mouse.y - centre.y) / before - nodes.pan.y
@@ -661,18 +718,28 @@ handle_node_camera :: proc(r: Rect) {
 
 	// Drag the background to pan. A drag that starts on a dot still pans,
 	// because a click only counts when the pointer has not moved.
-	if ui.clicked && nodes.hover < 0 {
+	//
+	// The middle button pans from anywhere, dot or not. On a map this dense
+	// there is often no background within reach to grab, and every other tool
+	// that shows a canvas pans this way.
+	middle := rl.IsMouseButtonPressed(.MIDDLE)
+	if (ui.clicked && nodes.hover < 0) || middle {
 		nodes.dragging  = true
 		nodes.drag_from = ui.mouse
 		nodes.pan_from  = nodes.pan
+		nodes.pan_middle = middle
 		ui.captured     = rawptr(&nodes)
 	}
-	if nodes.dragging && ui.held {
+	held := nodes.pan_middle ? rl.IsMouseButtonDown(.MIDDLE) : ui.held
+	if nodes.dragging && held {
 		nodes.pan.x = nodes.pan_from.x + (ui.mouse.x - nodes.drag_from.x) / nodes.zoom
 		nodes.pan.y = nodes.pan_from.y + (ui.mouse.y - nodes.drag_from.y) / nodes.zoom
 		ui.hover_cursor = .RESIZE_ALL
 	}
-	if ui.released { nodes.dragging = false }
+	if nodes.dragging && !held {
+		nodes.dragging   = false
+		nodes.pan_middle = false
+	}
 }
 
 // Marks which dots the search matches.
@@ -698,7 +765,7 @@ relight_nodes :: proc() {
 
 // Fits the whole map in the panel. Used when the map is first built and by the
 // reset button, so it is never possible to be lost off in empty space.
-frame_nodes :: proc(r: Rect) {
+frame_nodes :: proc(r: Rect, matches_only := false) {
 	if len(nodes.dots) == 0 {
 		nodes.pan  = {}
 		nodes.zoom = 1
@@ -707,12 +774,14 @@ frame_nodes :: proc(r: Rect) {
 	lo := rl.Vector2{ 1e9,  1e9}
 	hi := rl.Vector2{-1e9, -1e9}
 	for d in nodes.dots {
+        if matches_only && !d.lit { continue }
 		lo.x = min(lo.x, d.pos.x); lo.y = min(lo.y, d.pos.y)
 		hi.x = max(hi.x, d.pos.x); hi.y = max(hi.y, d.pos.y)
 	}
+    if lo.x > hi.x { return }
 	span_x := max(hi.x - lo.x, 1)
 	span_y := max(hi.y - lo.y, 1)
-	nodes.zoom = clamp(min((r.width - px(80)) / span_x, (r.height - px(80)) / span_y), 0.12, 4)
+	nodes.zoom = clamp(min((r.width - px(80)) / span_x, (r.height - px(80)) / span_y), 0.04, 4)
 	nodes.pan  = {-(lo.x + hi.x) * 0.5, -(lo.y + hi.y) * 0.5}
 }
 

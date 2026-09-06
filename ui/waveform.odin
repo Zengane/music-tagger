@@ -124,7 +124,7 @@ draw_waveform :: proc(r: Rect) {
 		return
 	}
 
-	handle_waveform_input(r)
+	if !handle_marker_input(r) { handle_waveform_input(r) }
 
 	start, length := player_view()
 	position := player_position()
@@ -285,7 +285,8 @@ draw_ruler :: proc(r: Rect, position: f32) {
 		// selection, because that is what will be sent. A selection that does
 		// not contain it simply carries no marker, and the flag is not drawn.
 		song_drop := !t.is_sfx && f.drop > 0
-		at := song_drop ? f.drop : f.hit
+		at := t.is_sfx ? f.hit : (song_drop ? f.drop : -1)
+		if len(t.cues) > 0 { at = -1 }
 		if has_selection() && mark_for_range(t, player.sel_start, player.sel_end) < 0 {
 			at = -1
 		}
@@ -313,6 +314,7 @@ draw_ruler :: proc(r: Rect, position: f32) {
 		}
 	}
 
+	draw_user_markers(r)
 	// The playhead's own marker.
 	if position >= start && position <= start + length {
 		// Rounded to a whole pixel, matching the line below: a triangle at

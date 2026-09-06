@@ -72,6 +72,7 @@ model_available :: proc() -> bool {
 // door; the effects one is an AudioSet tagger, whose ontology is sound effects
 // to begin with.
 start_analyze :: proc(indices: []int) {
+    if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if job.phase == .Loading || job.phase == .Running { return }
 	if len(indices) == 0 { return }
 
@@ -304,6 +305,7 @@ apply_result :: proc(obj: json.Object) {
 		add_tag_to_track(t, game)
 	}
 
+	assign_closest_mood(t)
 	t.scored = true
 	t.dirty  = true
 	invalidate_dirty_count()
@@ -433,20 +435,11 @@ save_track :: proc(index: int) -> (err: string) {
 	if index < 0 || index >= len(lib.tracks) { return "no track" }
 	t := &lib.tracks[index]
 
-	ours: [dynamic]string
-	ours.allocator = context.temp_allocator
-	game := ""
-	for tag in t.tags {
-		switch tag_kind(tag) {
-		case .Mood, .Sound, .SFX: append(&ours, tag)
-		case .Game:               if game == "" { game = tag }
-		case .Favorite, .Other:   // preserved by write_sidecar, not rewritten
-		}
-	}
-
-	if e := write_sidecar(t.path, ours[:], game); e != "" { return e }
+	if e := write_track_tags(t.path, t.tags[:], t.cues[:], t.media_kind); e != "" { return e }
 	t.dirty = false
+	t.cues_dirty = false
 	t.saved = true
+	sidecar_saves += 1
 	invalidate_dirty_count()
 	return ""
 }
@@ -486,4 +479,31 @@ count_dirty :: proc() -> int {
 	dirty_cache = n
 	dirty_cache_valid = true
 	return n
+}
+
+// A fallback only: existing moods and SFX are never changed.
+assign_closest_mood :: proc(t: ^Track) -> bool {
+    if t.is_sfx || has_kind(t, .Mood) { return false }
+    best := ""
+    score := f32(-1e9)
+    for s in t.scores {
+        if tag_kind(s.tag) == .Mood && s.score > score { best = s.tag; score = s.score }
+    }
+    if best == "" { return false }
+    add_tag_to_track(t, best)
+    return true
+}
+
+assign_missing_moods :: proc() {
+    undo_begin()
+    assigned := 0
+    missing := make([dynamic]int, 0, 32, context.temp_allocator)
+    for &t, i in lib.tracks {
+        if t.is_sfx || has_kind(&t, .Mood) { continue }
+        undo_capture(i)
+        if assign_closest_mood(&t) { assigned += 1 } else { append(&missing, i) }
+    }
+    undo_commit("assign closest moods")
+    if len(missing) > 0 { start_analyze(missing[:]) }
+    toast(fmt.tprintf("assigned %d moods; %d need analysis — review and Save", assigned, len(missing)))
 }

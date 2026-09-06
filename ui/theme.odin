@@ -4,6 +4,7 @@ package musictagger
 // colour or a size, so the app can be restyled without touching layout code.
 
 import "core:slice"
+import "core:strings"
 import rl "vendor:raylib"
 
 // ── palette ─────────────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ Atlas :: struct {
 	bold:     rl.Font,
 	cjk:      rl.Font,
 	has_cjk:  bool,
+	emoji: rl.Font,
 }
 
 atlases: [4]Atlas
@@ -160,12 +162,14 @@ line_h :: proc(size: f32) -> f32 {
 }
 
 text_w :: proc(w: Weight, s: cstring, size: f32) -> f32 {
+	if has_emoji(string(s)) { return emoji_text(w, s, 0, 0, size, {}, false) }
 	f, px_size := face(w, size, s)
 	return rl.MeasureTextEx(f, s, px_size, 0).x
 }
 
 // Draws `s` with its box top-left at (x, y).
 draw_text :: proc(w: Weight, s: cstring, x, y, size: f32, col: rl.Color) {
+	if has_emoji(string(s)) { emoji_text(w, s, x, y, size, col, true); return }
 	f, px_size := face(w, size, s)
 	// Snapped to whole pixels: a glyph placed on a half pixel is blurred by the
 	// sampler even when the atlas itself is sharp.
@@ -188,6 +192,11 @@ FONT_BOLD_PATH    :: "C:/Windows/Fonts/segoeuib.ttf"
 // interface scale changes, and after a scan — the last so the character set
 // covers whatever the library's file names actually contain.
 build_fonts :: proc(extra: []rune) {
+	emoji_points := make([dynamic]rune, 0, 16, context.temp_allocator)
+	for c in FAVORITE_TAGS { for r in c { append(&emoji_points, r) } }
+	for r in extra { if is_emoji(r) { append(&emoji_points, r) } }
+	clear(&font_emoji_known)
+	for c in emoji_points { font_emoji_known[c] = true }
 	base: map[rune]bool
 	defer delete(base)
 	for c in 32 ..= 0x24F      { base[rune(c)] = true } // Latin and supplements
@@ -197,6 +206,7 @@ build_fonts :: proc(extra: []rune) {
 	defer delete(wide_set)
 	for c in extra {
 		if c < 32 { continue }
+		if is_emoji(c) { continue }
 		if c >= 0x2E80 { wide_set[c] = true } else { base[c] = true }
 	}
 	wide := make([dynamic]rune, 0, len(wide_set), context.temp_allocator)
@@ -222,10 +232,12 @@ build_fonts :: proc(extra: []rune) {
 		if a.regular.texture.id != 0 { rl.UnloadFont(a.regular) }
 		if a.bold.texture.id    != 0 { rl.UnloadFont(a.bold) }
 		if a.has_cjk                 { rl.UnloadFont(a.cjk) }
+		if a.emoji.texture.id != 0 { rl.UnloadFont(a.emoji) }
 		a^ = {}
 
 		a.logical  = size
 		a.baked_px = max(i32(px(size) + 0.5), 8)
+		a.emoji = bake("C:/Windows/Fonts/seguiemj.ttf", a.baked_px, emoji_points[:])
 		a.regular  = bake(FONT_REGULAR_PATH, a.baked_px, points[:])
 		a.bold     = bake(FONT_BOLD_PATH,    a.baked_px, points[:])
 
@@ -250,4 +262,27 @@ bake :: proc(path: cstring, size_px: i32, points: []rune) -> rl.Font {
 		rl.SetTextureFilter(f.texture, .POINT)
 	}
 	return f
+}
+
+
+font_emoji_known: map[rune]bool
+fonts_dirty: bool
+request_emoji_fonts :: proc(s: string) {
+    for c in s { if is_emoji(c) && !font_emoji_known[c] { fonts_dirty = true; return } }
+}
+is_emoji :: proc(c: rune) -> bool { return (c >= 0x1F000 && c <= 0x1FAFF) || (c >= 0x2600 && c <= 0x27BF) || c == 0x2B50 || c == 0x2B55 }
+has_emoji :: proc(s: string) -> bool { for c in s { if is_emoji(c) { return true } }; return false }
+emoji_text :: proc(w: Weight, s: cstring, x, y, size: f32, col: rl.Color, draw: bool) -> f32 {
+    width: f32
+    for c in string(s) {
+        if c == 0xFE0F || c == 0x200D { continue }
+        b := strings.builder_make(context.temp_allocator)
+        strings.write_rune(&b, c)
+        letter := strings.clone_to_cstring(strings.to_string(b), context.temp_allocator)
+        f, height := face(w, size, letter)
+        if is_emoji(c) { f = atlas_for(size).emoji }
+        if draw { rl.DrawTextEx(f, letter, {x + width, y}, height, 0, col) }
+        width += rl.MeasureTextEx(f, letter, height, 0).x
+    }
+    return width
 }

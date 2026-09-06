@@ -10,6 +10,7 @@ package musictagger
 import "core:fmt"
 import "core:os"
 import "core:math"
+import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 import "core:sync"
@@ -33,6 +34,9 @@ check :: proc(name: string, ok: bool, detail := "") {
 run_selftest :: proc(folder: string, with_model := false) -> int {
 	fmt.println("music tagger — self test")
 
+	test_sfx_semantic_layout()
+	test_second_pass()
+	test_workflow_persistence()
 	test_sidecar_roundtrip()
 	test_sidecar_preserves_foreign_data()
 	test_aliases_and_kinds()
@@ -2497,4 +2501,276 @@ test_browsing :: proc() {
 	set_search_text("")
 	set_browse_folder("")
 	rebuild_view()
+}
+
+
+test_workflow_persistence :: proc() {
+    fmt.println("\ncache, folder merge and manual markers")
+    path := strings.clone(fake_track("workflow.mp3"))
+    defer delete(path)
+    defer os.remove(path)
+    defer os.remove(sidecar_path(path, context.temp_allocator))
+    check("write named marker", write_track_tags(path, {"Epic", "custom"}, {{12.5, "Swell"}}) == "")
+    check("save explicit SFX override", write_track_tags(path, {"Epic", "custom"}, {{12.5, "Swell"}}, "sfx") == "")
+    t := Track{path = path}
+    load_track_cues(&t, context.allocator)
+    check("media type survives sidecar reload", t.is_sfx && t.media_kind == "sfx")
+    delete(t.media_kind)
+    check("nested SFX folder detected", is_skipped_dir("packs/collection/sfx/impacts"))
+    check("generic soundtrack not SFX", !is_skipped_dir("packs/soundtrack"))
+    check("marker survives sidecar reload", len(t.cues) == 1 && t.cues[0].at == 12.5 && t.cues[0].name == "Swell")
+    check("manual marker exports without analysis", mark_for_range(&t, 10, 20) == 12.5)
+    check("range outside marker exports none", mark_for_range(&t, 0, 10) == -1)
+    t.name = "workflow.mp3"
+    t.ext = ".mp3"
+    t.duration = 30
+    append(&t.cues, Cue{15, strings.clone("A & B")})
+    xml_path, xml_ok := write_range_xml(&t, 10, 20)
+    check("named marker XML exports", xml_ok)
+    if xml_ok {
+        raw, err := os.read_entire_file(xml_path, context.temp_allocator)
+        check("XML contains both named markers", err == nil && strings.contains(string(raw), "<name>Swell</name>") && strings.contains(string(raw), "<name>A &amp; B</name>"))
+        check("XML uses relative marker time", strings.contains(string(raw), "<in>75</in>"))
+        _ = os.remove(xml_path)
+        delete(xml_path)
+    }
+
+    for cue in t.cues { delete(cue.name) }
+    delete(t.cues)
+    check("overwrite existing sidecar", write_track_tags(path, {"custom"}, {{20, "Arrival"}}) == "")
+    tags: [dynamic]string
+    load_tags_into(path, &tags, context.allocator)
+    check("removed tag stays removed", len(tags) == 1 && tags[0] == "custom")
+    for tag in tags { delete(tag) }; delete(tags)
+
+    previous := lib
+    lib = {}
+    _ = virtual.arena_init_growing(&lib.arena)
+    lib.root = strings.clone(scratch(), lib_allocator())
+    lib.tracks = make([dynamic]Track)
+    a := Track{path = path, name = "workflow.mp3", rel = "workflow.mp3", dirty = true, cues_dirty = true}
+    append(&a.tags, "custom")
+    append(&a.cues, Cue{20, "Arrival"})
+    append(&lib.tracks, clone_track(a, lib_allocator()))
+    delete(a.tags); delete(a.cues)
+    lib.scanned = true
+    cache_path := strings.clone(snapshot_path(lib.root))
+    defer delete(cache_path)
+    defer os.remove(cache_path)
+    save_library_snapshot()
+    free_library(&lib)
+    free_all(context.temp_allocator)
+    check("snapshot loads", load_library_snapshot(scratch()))
+    free_all(context.temp_allocator)
+    check("snapshot owns marker and tag strings across frames", len(lib.tracks) == 1 && lib.tracks[0].cues[0].name == "Arrival" && lib.tracks[0].tags[0] == "custom")
+    check("unsaved edits survive restart", lib.tracks[0].dirty && lib.tracks[0].cues_dirty)
+
+    scan.result = {}
+    _ = virtual.arena_init_growing(&scan.result.arena)
+    alloc := virtual.arena_allocator(&scan.result.arena)
+    scan.result.tracks = make([dynamic]Track)
+    append(&scan.result.tracks, clone_track(Track{path = path, name = "workflow.mp3"}, alloc))
+    append(&scan.result.tracks, clone_track(Track{path = path, name = "duplicate"}, alloc))
+    append(&scan.result.tracks, clone_track(Track{path = "new-file.mp3", name = "new"}, alloc))
+    scan.request.additive = true
+    merge_scan_result()
+    check("folder import deduplicates paths", len(scan.result.tracks) == 2)
+    found := false
+    for track in scan.result.tracks { if track.path == path { found = track.dirty && len(track.cues) == 1 && track.cues[0].name == "Arrival" } }
+    check("folder import preserves unsaved markers", found)
+    free_library(&scan.result)
+    scan.request = {}
+    free_library(&lib)
+    lib = previous
+}
+
+
+run_review_ui :: proc() -> int {
+    rl.SetConfigFlags({.WINDOW_HIDDEN})
+    rl.InitWindow(1440, 900, "UI regression review")
+    defer rl.CloseWindow()
+    ui_scale = 1
+    init_tag_library()
+    build_fonts(library_runes())
+    _ = virtual.arena_init_growing(&lib.arena)
+    lib.root = strings.clone("C:/Soundtracks", lib_allocator())
+    lib.tracks = make([dynamic]Track)
+    t := Track{path = "C:/Soundtracks/Game/Song.mp3", name = "Song.mp3", ext = ".mp3", rel = "Game/Song.mp3", duration = 120, features = {valid = true}, dirty = true}
+    append(&t.tags, "Epic")
+    append(&t.cues, Cue{24, "Swell"})
+    append(&lib.tracks, clone_track(t, lib_allocator()))
+    lib.scanned = true
+    count_tags()
+    rebuild_view()
+    app.selected = 0
+    app.inspector = true
+    app.rail_visible = true
+    app.view = .Tag
+    for g, i in tag_groups { if g.kind == .Favorite { app.group_open[i] = true } }
+    player.track = 0
+    player.duration = 120
+    player.sel_start = 10
+    player.sel_end = 30
+    job.phase = .Loading
+    rl.SetWindowSize(1040, 900)
+    for _ in 0 ..< 2 {
+        begin_ui()
+        rl.BeginDrawing()
+        rl.ClearBackground(BG)
+        draw_app()
+        rl.EndDrawing()
+        end_ui()
+    }
+    image := rl.LoadImageFromScreen()
+    _ = rl.ExportImage(image, "work/review-ui.png")
+    rl.UnloadImage(image)
+    edit_marker(0, 0)
+    field_set(&app.editor_field, "Swell ⭐ 🔥")
+    build_fonts(library_runes())
+    for _ in 0 ..< 2 {
+        begin_ui()
+        rl.BeginDrawing()
+        rl.ClearBackground(BG)
+        draw_app()
+        rl.EndDrawing()
+        end_ui()
+    }
+    image = rl.LoadImageFromScreen()
+    _ = rl.ExportImage(image, "work/review-marker.png")
+    rl.UnloadImage(image)
+    close_tag_editor()
+    lib.tracks[0].is_sfx = true
+    split_job.path = strings.clone(lib.tracks[0].path)
+    split_job.ready = true
+    split_job.count = 3
+    split_job.clips = make([][2]f64, 3)
+    split_job.clips[0] = {0, 2}; split_job.clips[1] = {3, 4}; split_job.clips[2] = {5, 8}
+    set_owned(&split_job.detail, "3 sounds found. Preview below, then create files.")
+    job.phase = .Idle
+    for _ in 0 ..< 2 {
+        begin_ui(); rl.BeginDrawing(); rl.ClearBackground(BG); draw_app(); rl.EndDrawing(); end_ui()
+    }
+    image = rl.LoadImageFromScreen()
+    _ = rl.ExportImage(image, "work/review-split.png")
+    rl.UnloadImage(image)
+    close_tag_editor()
+    app.view=.Map; app.inspector=false
+    clear(&lib.tracks)
+    names := [?]string{"footsteps_gravel.wav","gunshot.wav","wind_ambience.wav","ui_confirm.wav","car_engine.wav","metal_door.wav","water_splash.wav","explosion.wav"}
+    for i in 0..<8000 {
+        name:=names[i%len(names)]
+        append(&lib.tracks,Track{name=name,name_low=name,rel=name,path=strings.clone(fmt.tprintf("fixture/%05d",i),lib_allocator()),is_sfx=true})
+    }
+    search.kind=.Effects
+    rebuild_view(); invalidate_nodes()
+    nodes.mode=.Tags
+    rl.SetWindowSize(1440,900)
+    for _ in 0..<2 { begin_ui(); rl.BeginDrawing(); rl.ClearBackground(BG); draw_nodes(rect(0,0,1440,900)); rl.EndDrawing(); end_ui() }
+    image=rl.LoadImageFromScreen()
+    _=rl.ExportImage(image,"work/review-sfx-families.png")
+    rl.UnloadImage(image)
+    return 0
+}
+
+
+test_second_pass :: proc() {
+    fmt.println("\nsecond-pass regressions")
+    old_lib := lib
+    old_groups := tag_groups
+    old_search := search
+    old_map := music_map
+    old_nodes := nodes
+    defer { lib = old_lib; tag_groups = old_groups; search = old_search; music_map = old_map; nodes = old_nodes }
+    lib = {}; tag_groups = {}; search = {}; nodes = {}
+    _ = virtual.arena_init_growing(&lib.arena)
+    lib.tracks = make([dynamic]Track)
+    lib.scanned = true
+    for i in 0 ..< 3 {
+        append(&lib.tracks, clone_track(Track{path = fmt.tprintf("track%d", i), name = "test.mp3", ext = ".mp3"}, lib_allocator()))
+    }
+    count_tags()
+    append(&lib.tracks[0].scores, Tag_Score{tag = "Chill", score = 0.2, threshold = 0.9}, Tag_Score{tag = "Epic", score = 0.3, threshold = 0.8})
+    check("closest mood assigned below threshold", assign_closest_mood(&lib.tracks[0]) && has_kind(&lib.tracks[0], .Mood))
+    check("highest score wins", slice.contains(lib.tracks[0].tags[:], "Epic"))
+    check("existing mood kept", !assign_closest_mood(&lib.tracks[0]))
+    prior_player := player
+    prior_ui := ui
+    prior_editor := app.tag_editor
+    app.tag_editor = false
+    player.track = 0; player.duration = 30; player.view_start = 0; player.view_len = 0
+    lib.tracks[0].features = {valid = true, drop = 12}
+    ui = {mouse = {120, 5}, clicked = true, held = true}
+    check("guessed marker can be picked up", handle_marker_input(rect(0, 0, 300, 60)))
+    check("moving a guess creates an owned manual marker", len(lib.tracks[0].cues) == 1 && lib.tracks[0].cues_dirty)
+    ui.mouse.x = 180
+    handle_marker_input(rect(0, 0, 300, 60))
+    check("drag updates marker time", abs(lib.tracks[0].cues[0].at - 18) < 0.01)
+    marker_drag = -1
+    player = prior_player; ui = prior_ui; app.tag_editor = prior_editor
+
+    lib.tracks[1].is_sfx = true
+    check("effects receive no mood", !assign_closest_mood(&lib.tracks[1]))
+    lib.tracks[1].is_sfx = false
+    music_map = {loaded = true, found = true, points = make(map[string]rl.Vector2)}
+    for t, i in lib.tracks { music_map.points[t.path] = {f32(i), f32(i)} }
+    append(&search.view, 0)
+    build_sound_layout()
+    check("filtered model map keeps every track", len(nodes.dots) == 3 && nodes.source == .Model)
+    relight_nodes()
+    lit := 0
+    for d in nodes.dots { if d.lit { lit += 1 } }
+    check("search highlights matches only", lit == 1)
+    append(&search.view, 1, 2)
+    refilter_nodes(); relight_nodes()
+    lit = 0
+    for d in nodes.dots { if d.lit { lit += 1 } }
+    check("clearing filter restores map without switching view", lit == 3)
+
+    search.kind = .Music
+    clear(&music_map.points)
+    build_sound_layout()
+    check("music without AI positions never uses SFX layout", nodes.source == .Model && len(nodes.anchors) == 0)
+    lib.tracks[1].is_sfx = true
+    build_sound_layout()
+    clean := true
+    for d in nodes.dots { if lib.tracks[d.track].is_sfx { clean = false } }
+    check("music fallback excludes reassigned effects", clean)
+    ui = {mouse = {5,5}, clicked = true, held = true}
+    selection_paint = {}
+    check("checkbox starts drag selection", paint_checkbox(rect(0,0,10,10), rect(0,0,100,20), false) && selection_paint.value)
+    ui.mouse.y = 65
+    check("fast drag selects crossed rows", paint_checkbox(rect(0,30,10,10), rect(0,25,100,20), false))
+    selection_paint = {}
+    ui = {mouse = {50,5}, clicked = true, held = true}
+    check("file body does not start selection drag", !paint_checkbox(rect(0,0,10,10),rect(0,0,100,20),false))
+    ui = prior_ui
+
+    g := Tag_Group{name = strings.clone("Favorites"), kind = .Favorite}
+    append(&g.tags, strings.clone("⭐"), strings.clone("★"))
+    append(&tag_groups, g)
+    path := fake_track("tag-library-test.json")
+    _ = os.write_entire_file(path, `{ "groups": [{"name":"Favorites","tags":["⭐"]}] }`)
+    _, _, ok := import_tag_library_file(path, replace_existing = true)
+    check("saved favorite list replaces defaults", ok && len(tag_groups[0].tags) == 1 && tag_groups[0].tags[0] == "⭐")
+    _, _, ok = import_tag_library_file(path, replace_existing = true)
+    check("deleted favorites stay deleted on reload", ok && len(tag_groups[0].tags) == 1)
+    _ = os.remove(path)
+    free_library(&lib)
+}
+
+test_sfx_semantic_layout :: proc() {
+    old_lib,old_nodes,old_search,old_map:=lib,nodes,search,sfx_sound_map
+    defer { lib=old_lib;nodes=old_nodes;search=old_search;sfx_sound_map=old_map }
+    lib={};nodes={};search={kind=.Effects};sfx_sound_map={loaded=true}
+    defer { delete(lib.tracks);delete(nodes.dots);delete(nodes.anchors);delete(sfx_sound_map.points) }
+    for i in 0..<5 {
+        path:=fmt.tprintf("effect-%d.wav",i)
+        append(&lib.tracks,Track{path=path,name=path,is_sfx=true})
+        if i<4 { sfx_sound_map.points[path]={f32(i)*0.2,f32(i)*0.3} }
+    }
+    check("SFX semantic map uses saved audio positions",build_sfx_sound_layout() && nodes.source==.Semantic)
+    check("new effects remain visible as unplaced",len(nodes.dots)==5)
+    nodes.dots[0].lit=true
+    frame_nodes(rect(0,0,800,600),true)
+    check("focus matches centers the matching sound",abs(nodes.pan.x+nodes.dots[0].pos.x)<0.01)
 }

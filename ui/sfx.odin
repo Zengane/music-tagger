@@ -75,7 +75,7 @@ apply_sfx_suggestions :: proc(track_index: int) -> int {
 
 	guesses: [dynamic]string
 	guesses.allocator = context.temp_allocator
-	suggest_sfx_tags(t.name, &guesses)
+	suggest_track_sfx_tags(t, &guesses)
 
 	// What the waveform says about itself. Riser, Impact, Drone and the rest
 	// are measured rather than guessed, so they are at least as trustworthy as
@@ -150,3 +150,17 @@ sfx_quick_tags :: proc() -> []string {
 	if g == nil { return SFX_TAGS }
 	return g.tags[:]
 }
+
+// Descriptive filenames outrank pack directories. Directories fill gaps only.
+suggest_track_sfx_tags :: proc(t: ^Track, out: ^[dynamic]string) {
+    suggest_sfx_tags(t.name, out)
+    specific := false
+    for family in SFX_FAMILIES { if slice.contains(out[:], family) { specific = true; break } }
+    if !specific {
+        folders := make([dynamic]string, 0, 8, context.temp_allocator)
+        suggest_sfx_tags(t.rel, &folders)
+        for tag in folders { if !slice.contains(out[:],tag) { append(out,tag) } }
+    }
+}
+
+SFX_FAMILIES :: [?]string{"Footstep", "Weapon", "Vehicle", "Creature", "Voice", "Interface", "Nature", "Mechanical", "Liquid", "Fire", "Electricity", "Magic", "Musical", "Foley", "Ambience", "Whoosh", "Explosion", "Impact", "Drone", "Riser", "Downlifter", "Transition"}

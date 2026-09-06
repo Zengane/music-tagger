@@ -142,7 +142,7 @@ init_tag_library :: proc() {
 }
 
 load_tag_library :: proc() {
-	import_tag_library_file(tag_library_path())
+	import_tag_library_file(tag_library_path(), replace_existing = true)
 }
 
 // Merges a tag library file over the built-in vocabulary.
@@ -152,7 +152,7 @@ load_tag_library :: proc() {
 // `tagGroups` of `{title, color, children:[{title, color}]}`. Reading both
 // means a library exported from TagSpaces can simply be dropped on the window,
 // colours and all, instead of being retyped.
-import_tag_library_file :: proc(path: string) -> (groups: int, tags: int, ok: bool) {
+import_tag_library_file :: proc(path: string, replace_existing := false) -> (groups: int, tags: int, ok: bool) {
 	raw, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil { return 0, 0, false }
 
@@ -221,6 +221,10 @@ import_tag_library_file :: proc(path: string) -> (groups: int, tags: int, ok: bo
 		tag_arr, is_tag_arr := list_val.(json.Array)
 		if !is_tag_arr { continue }
 
+		if replace_existing {
+			for tag in g.tags { delete(tag) }
+			clear(&g.tags)
+		}
 		for t in tag_arr {
 			title := ""
 			// A tag is a bare string in our files and an object in theirs.
@@ -242,6 +246,7 @@ import_tag_library_file :: proc(path: string) -> (groups: int, tags: int, ok: bo
 }
 
 save_tag_library :: proc() {
+	fonts_dirty = true
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, "{\n  \"groups\": [\n")
 	for g, gi in tag_groups {

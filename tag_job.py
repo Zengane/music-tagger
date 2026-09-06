@@ -67,7 +67,6 @@ def main() -> int:
     args = ap.parse_args()
 
     from mtag.dataset import EmbeddingCache
-    from mtag.encoders import get_encoder
     from mtag.model import MODEL_PATH, Tagger
 
     if not MODEL_PATH.exists():
@@ -77,8 +76,7 @@ def main() -> int:
     try:
         emit(event="loading", detail="loading tag model")
         tagger = Tagger.load()
-        emit(event="loading", detail=f"loading encoder {tagger.encoder_name}")
-        encoder = get_encoder(tagger.encoder_name)
+        encoder = None
         cache = EmbeddingCache(tagger.encoder_name)
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
@@ -88,7 +86,7 @@ def main() -> int:
     emit(
         event="ready",
         encoder=tagger.encoder_name,
-        device=device_name(),
+        device="on demand",
         tags=len(getattr(tagger, "probes", {})),
         zero_shot=len(getattr(tagger, "zeroshot", {})),
     )
@@ -101,53 +99,57 @@ def main() -> int:
         emit(event="error", message="no work: pass --paths-from or --probe")
         return 2
 
-    paths = [
+    paths = list(dict.fromkeys([
         line.strip()
         for line in Path(args.paths_from).read_text(encoding="utf-8").splitlines()
         if line.strip()
-    ]
+    ]))
     emit(event="total", count=len(paths))
 
-    # Embed everything first, one model at a time.
-    #
-    # The loop below asks for a whole fused vector per track, which means every
-    # part of the fusion is loaded at once — and three of them do not fit on an
-    # 8 GiB card. Windows serves the shortfall out of system RAM rather than
-    # failing, at roughly forty times the cost: a 905-file run was measured at
-    # just under three minutes a file, about 45 hours.
-    #
-    # `prefill` does the same work model-major, so only one is ever resident.
-    # Afterwards every part is cached and the loop below is pure arithmetic.
-    if hasattr(encoder, "prefill"):
-        def progress(part, i, n, path, error):
-            if n == 0:
-                emit(event="loading", detail=f"{part}: already done")
-            elif i == 1 or i == n or i % 10 == 0:
-                emit(event="loading", detail=f"embedding with {part}: {i} of {n}")
-            if error:
-                emit(event="error", path=str(path), message=f"{part}: {error}")
-
+    # Read combined vectors once. A cached review never imports torch or
+    # constructs an encoder, and never checks the three component caches.
+    vectors = {}
+    errors = {}
+    missing = []
+    for raw in paths:
         try:
-            encoder.prefill(paths, progress)
+            vector = cache.get(Path(raw))
+            if vector is None:
+                missing.append(raw)
+            else:
+                vectors[raw] = vector
         except Exception as e:
-            traceback.print_exc(file=sys.stderr)
-            emit(event="error", message=f"embedding failed: {e}")
-            return 2
-        # Back to Running: the progress above is reported as Loading, and the
-        # per-track results that follow belong to the running phase.
-        emit(
-            event="ready",
-            encoder=tagger.encoder_name,
-            device=device_name(),
-            tags=len(getattr(tagger, "probes", {})),
-            zero_shot=len(getattr(tagger, "zeroshot", {})),
-        )
+            errors[raw] = str(e)
+
+    if missing:
+        from mtag.encoders import get_encoder
+        emit(event="loading", detail=f"loading encoder for {len(missing)} uncached files")
+        encoder = get_encoder(tagger.encoder_name)
+        if hasattr(encoder, "prefill"):
+            def progress(part, i, n, path, error):
+                if n == 0:
+                    emit(event="loading", detail=f"{part}: already cached")
+                elif i == 1 or i == n or i % 10 == 0:
+                    emit(event="loading", detail=f"embedding with {part}: {i} of {n}")
+                if error:
+                    errors[str(path)] = f"{part}: {error}"
+            try:
+                encoder.prefill(missing, progress)
+            except Exception as e:
+                emit(event="error", message=f"embedding failed: {e}")
+                return 2
+    emit(event="ready", encoder=tagger.encoder_name,
+         device=device_name() if missing else "cache (no GPU)",
+         tags=len(getattr(tagger, "probes", {})),
+         zero_shot=len(getattr(tagger, "zeroshot", {})))
 
     analyzed = failed = 0
     for raw in paths:
         path = Path(raw)
         try:
-            vector = cache.get(path)
+            if raw in errors:
+                raise RuntimeError(errors[raw])
+            vector = vectors.get(raw)
             if vector is None:
                 vector = encoder.embed_file(path)
                 cache.put(path, vector)

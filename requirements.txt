@@ -17,3 +17,4 @@ librosa>=0.10
 soundfile>=0.12
 flask>=3.0
 pywebview>=5.4
+umap-learn

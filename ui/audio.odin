@@ -54,6 +54,49 @@ raylib_plays_natively :: proc(ext: string) -> bool {
 	return ext == ".mp3" || ext == ".wav" || ext == ".ogg" || ext == ".flac"
 }
 
+// Whether raylib's own WAV decoder can be trusted with this particular file.
+//
+// ".wav" is not one format. raylib builds its stream from whatever the header
+// says the sample size is, and 8-bit unsigned — where silence is 128 rather
+// than 0 — came out as noise. `DoorBell11.wav` is one; there are 209 more, plus
+// 1602 at 24-bit and 28 at 32-bit, which is 28% of this library's WAV files.
+//
+// Rather than teach the player each of those, only the one shape that is known
+// to be right is played as-is: uncompressed PCM at 16 bits. Everything else
+// goes through the ffmpeg conversion that non-WAV formats already use, and is
+// cached after the first play like any other.
+@(private)
+wav_is_plain_16bit :: proc(path: string) -> bool {
+	handle, err := os.open(path)
+	if err != nil { return false }
+	defer os.close(handle)
+
+	head: [4096]u8
+	n, read_err := os.read(handle, head[:])
+	if read_err != nil || n < 44 { return false }
+	if string(head[0:4]) != "RIFF" || string(head[8:12]) != "WAVE" { return false }
+
+	// Walk the chunks to `fmt `. It is normally first, but a file with a
+	// leading metadata chunk is legal and does turn up.
+	i := 12
+	for i + 8 <= n {
+		id   := string(head[i : i + 4])
+		size := int(u32(head[i+4]) | u32(head[i+5]) << 8 | u32(head[i+6]) << 16 | u32(head[i+7]) << 24)
+		if id == "fmt " {
+			if i + 24 > n { return false }
+			format := u16(head[i+8]) | u16(head[i+9]) << 8
+			bits   := u16(head[i+22]) | u16(head[i+23]) << 8
+			// 1 is uncompressed PCM. 3 is float, 0xFFFE is "extensible", and
+			// everything else is some flavour of compression.
+			return format == 1 && bits == 16
+		}
+		// Chunks are padded to an even length.
+		i += 8 + size + (size & 1)
+		if size < 0 { return false }
+	}
+	return false
+}
+
 @(private)
 hash_key :: proc(path: string, size, mtime: i64) -> u64 {
 	// FNV-1a over the same three things the Python cache keys on, so moving a
@@ -263,7 +306,9 @@ wave: Wave_Job = {want = -1, active = -1, ready = -1}
 // Restarts the warm-up over a freshly imported library. The pool in
 // warmup.odin does the work; this worker only serves the track on screen.
 begin_waveform_warmup :: proc() {
-	start_warmup(lib.tracks[:])
+	missing := make([dynamic]Track, 0, 32, context.temp_allocator)
+	for t in lib.tracks { if !t.features.valid { append(&missing, t) } }
+	start_warmup(missing[:])
 }
 
 waveform_warmup :: proc() -> (done: int, total: int, running: bool) {
@@ -385,6 +430,9 @@ wave_worker :: proc() {
 Player :: struct {
 	music:      rl.Music,
 	loaded:     bool,
+	// Where the stream was on the previous frame, so a wrap back to the start
+	// can be told apart from ordinary progress. See `check_track_end`.
+	last_pos:   f32,
 	// The encoded file, kept alive because raylib streams straight out of it.
 	// Freeing this while the music is loaded silences playback or crashes.
 	backing:    []byte,
@@ -472,7 +520,12 @@ init_audio :: proc() {
 // fail — which is why none of those 586 files would play.
 @(private)
 playable_path :: proc(t: ^Track) -> (path: string, ext: string, ok: bool) {
-	if raylib_plays_natively(t.ext) { return t.path, t.ext, true }
+	if t.ext == ".wav" {
+		if wav_is_plain_16bit(t.path) { return t.path, t.ext, true }
+		// Falls through to the conversion below.
+	} else if raylib_plays_natively(t.ext) {
+		return t.path, t.ext, true
+	}
 
 	dest := join_path({cache_dir("preview"), fmt.tprintf("%016x.wav", hash_key(t.path, t.size, t.mtime))})
 	if os.exists(dest) { return dest, ".wav", true }
@@ -486,6 +539,7 @@ playable_path :: proc(t: ^Track) -> (path: string, ext: string, ok: bool) {
 }
 
 play_track :: proc(track_index: int) {
+	marker_drag = -1
 	if track_index < 0 || track_index >= len(lib.tracks) { return }
 	unload_music()
 	player.sel_start = 0
@@ -564,7 +618,27 @@ update_audio :: proc() {
 @(private)
 check_track_end :: proc() {
 	if !player.playing || player.duration <= 0 { return }
-	if player_position() < player.duration - 0.15 { return }
+
+	pos := player_position()
+
+	// The margin scales with the track.
+	//
+	// It was a flat 0.15 s, which for anything shorter than that put the end
+	// *before* the beginning — the sound was declared finished on the first
+	// frame and paused before a sample of it was heard. Half the effects in
+	// this library are under a second, and they were all being clipped or
+	// skipped by the same line.
+	margin := clamp(player.duration * 0.02, 0.005, 0.15)
+
+	// A stream that has wrapped round to the start has finished.
+	//
+	// raylib loops a music stream by default, so a very short sound can pass
+	// its own end between two frames and be back near zero before this looks.
+	// The position going backwards is the only reliable sign of that.
+	wrapped := player.last_pos > 0 && pos + 0.05 < player.last_pos
+	player.last_pos = pos
+
+	if !wrapped && pos < player.duration - margin { return }
 
 	switch {
 	case player.loop:
@@ -611,6 +685,9 @@ player_position :: proc() -> f32 {
 
 // Releases the stream and the bytes behind it, in that order.
 unload_music :: proc() {
+	// Or the next track inherits the last one's position and is called finished
+	// before it starts.
+	player.last_pos = 0
 	if player.loaded {
 		rl.UnloadMusicStream(player.music)
 		player.loaded = false
@@ -631,9 +708,15 @@ toggle_play :: proc() {
 	player.playing = !player.playing
 }
 
+// Seeking sets the remembered position too, so a deliberate jump backwards is
+// not mistaken for the stream wrapping round to the start.
 seek_to :: proc(seconds: f32) {
 	if !player.loaded { return }
-	rl.SeekMusicStream(player.music, clamp(seconds, 0, max(player.duration - 0.05, 0)))
+	target := clamp(seconds, 0, max(player.duration - 0.05, 0))
+	rl.SeekMusicStream(player.music, target)
+	// Or a deliberate jump backwards reads as the stream wrapping round, and
+	// the track is treated as finished the moment you scrub to the start.
+	player.last_pos = target
 }
 
 set_volume :: proc(v: f32) {

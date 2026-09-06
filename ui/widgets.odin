@@ -51,6 +51,7 @@ begin_ui :: proc() {
 	ui.hover_cursor = .DEFAULT
 	ui.clip_count   = 0
 	ui.in_modal     = false
+	update_tag_drag()
 	if ui.released { ui.captured = nil }
 }
 
@@ -746,6 +747,7 @@ text_field :: proc(f: ^Text_Field, r: Rect, placeholder: cstring, offset_x := f3
 		if rl.IsKeyPressed(.END)  { move(f, len(f.buf), shift) }
 	}
 
+	if changed { request_emoji_fonts(field_string(f)) }
 	// ── drawing ──
 	begin_clip(r)
 	defer end_clip()

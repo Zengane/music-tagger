@@ -115,11 +115,11 @@ music_map_position :: proc(t: ^Track) -> (rl.Vector2, bool) {
 // having.
 music_map_coverage :: proc() -> (mapped: int, music: int) {
 	load_music_map()
-	for index in search.view {
-		t := &lib.tracks[index]
+	for &t in lib.tracks {
+		if !kind_allows(&t) { continue }
 		if t.is_sfx { continue }
 		music += 1
-		if _, ok := music_map_position(t); ok { mapped += 1 }
+		if _, ok := music_map_position(&t); ok { mapped += 1 }
 	}
 	return
 }
@@ -143,6 +143,7 @@ map_job: Map_Job
 // stable, and a map rebuilt from a filtered list would move every dot as soon
 // as the filter changed.
 start_music_map :: proc() {
+    if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if map_job.running { return }
 	if lib.root == "" {
 		toast("import a library first")
@@ -222,6 +223,8 @@ finish_map_job :: proc() {
 		toast(map_job.detail == "" ? "the map job failed" : map_job.detail)
 		return
 	}
+    for key in sfx_sound_map.points { delete(key) }
+    clear(&sfx_sound_map.points); sfx_sound_map.loaded=false
 	invalidate_music_map()
 	load_music_map()
 	invalidate_nodes()

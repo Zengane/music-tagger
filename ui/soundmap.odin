@@ -70,13 +70,16 @@ build_sound_layout :: proc() {
 	nodes.hover = -1
 	if !lib.scanned { return }
 
+    if search.kind == .Effects && build_sfx_sound_layout() { return }
 	// Music and effects want different descriptions, so the map uses whichever
 	// suits what is on screen. A view that is mostly music the model can place
 	// gets the model's layout; anything else gets the measurements. Mixing the
 	// two in one picture would put two unrelated coordinate systems on the same
 	// plane, where being near something would mean nothing at all.
 	mapped, music := music_map_coverage()
-	if music * 2 > len(search.view) && mapped * 2 > music {
+	eligible := 0
+	for &t in lib.tracks { if kind_allows(&t) { eligible += 1 } }
+	if search.kind == .Music || (music * 2 > eligible && mapped * 2 > music) {
 		nodes.source = .Model
 		build_model_layout()
 		return
@@ -371,14 +374,14 @@ label_regions :: proc() {
 // else — inventing a spot for them would be the one thing a map must not do.
 @(private)
 build_model_layout :: proc() {
-	for track_index in search.view {
-		t := &lib.tracks[track_index]
+	for &t, track_index in lib.tracks {
+		if !kind_allows(&t) { continue }
 		if t.is_sfx { continue }
 
-		p, ok := music_map_position(t)
+		p, ok := music_map_position(&t)
 		if !ok { continue }
 
-		tag, kind := leading_tag(t)
+		tag, kind := leading_tag(&t)
 		append(&nodes.dots, Node_Dot{
 			track = track_index,
 			pos   = {p.x * WORLD_R, p.y * WORLD_R},
@@ -408,7 +411,7 @@ label_tag_regions :: proc() {
 	for d in nodes.dots {
 		t := &lib.tracks[d.track]
 		for tag in t.tags {
-			if tag_kind(tag) not_in MAP_KINDS { continue }
+			if tag_kind(tag) not_in MAP_KINDS || (!t.is_sfx && tag_kind(tag) == .SFX) || (t.is_sfx && tag_kind(tag) != .SFX) { continue }
 			if tag not_in groups { groups[tag] = make([dynamic]rl.Vector2) }
 			list := &groups[tag]
 			append(list, d.pos)
@@ -485,6 +488,6 @@ local_share :: proc(tag: string, centre: rl.Vector2, radius: f32) -> (share, pre
 leading_tag :: proc(t: ^Track) -> (string, Tag_Kind) {
 	for tag in t.tags { if tag_kind(tag) == .Mood  { return tag, .Mood } }
 	for tag in t.tags { if tag_kind(tag) == .Sound { return tag, .Sound } }
-	for tag in t.tags { if tag_kind(tag) == .SFX   { return tag, .SFX } }
+	if t.is_sfx { for tag in t.tags { if tag_kind(tag) == .SFX { return tag, .SFX } } }
 	return "", .Other
 }

@@ -26,7 +26,11 @@ Tag_Kind :: enum u8 {
 	Favorite, // star emoji, user-curated, never rewritten
 }
 
+Cue :: struct { at: f32, name: string }
+
 Track :: struct {
+	cues: [dynamic]Cue,
+	cues_dirty: bool,
 	path:      string, // absolute path, as the OS reports it
 	rel:       string, // path relative to the scanned root, for display
 	name:      string, // file name with extension
@@ -38,6 +42,7 @@ Track :: struct {
 	mtime:     i64,
 	tags:      [dynamic]string,
 	kinds:     [dynamic]Tag_Kind,
+	media_kind: string, // explicit sidecar override: music or sfx
 	is_sfx:    bool, // sits under a directory the music taxonomy skips
 	duration:  f32,  // seconds; 0 until a waveform or the player learns it
 	// How the sound behaves over time, read from the peaks cache. This is what
@@ -319,6 +324,50 @@ write_sidecar :: proc(track_path: string, tags: []string, game := "") -> (err: s
 }
 
 // ── game detection ──────────────────────────────────────────────────────────
+
+// Manual editing owns the complete tag list. Preserve the rest of the JSON
+// document, including fields and per-tag properties supplied by other tools.
+write_track_tags :: proc(path: string, tags: []string, cues: []Cue = nil, media_kind: string = "") -> string {
+	sp := sidecar_path(path, context.temp_allocator)
+	obj := make(json.Object, context.temp_allocator)
+	if raw, err := os.read_entire_file(sp, context.temp_allocator); err == nil {
+		value, perr := json.parse(strip_bom(raw), .JSON, false, context.temp_allocator)
+		if perr != nil { return "sidecar is invalid; it was left untouched" }
+		parsed, ok := value.(json.Object)
+		if !ok { return "sidecar is not an object; it was left untouched" }
+		obj = parsed
+	} else if os.exists(sp) { return "could not read the existing sidecar" }
+	previous, _ := obj["tags"].(json.Array)
+	entries := make(json.Array, 0, len(tags), context.temp_allocator)
+	for tag in tags {
+		if !has_visible_text(tag) { continue }
+		entry := make(json.Object, context.temp_allocator)
+		for value in previous {
+			if old, ok := value.(json.Object); ok && canonical_tag(json_str(old, "title")) == tag {
+				entry = old
+				break
+			}
+		}
+		entry["title"] = json.String(tag)
+		if _, exists := entry["type"]; !exists { entry["type"] = json.String("sidecar") }
+		append(&entries, entry)
+	}
+	encoded_cues, cue_err := json.marshal(cues, {}, context.temp_allocator)
+	if cue_err != nil { return "could not encode markers" }
+	cue_value, _ := json.parse(encoded_cues, .JSON, false, context.temp_allocator)
+	obj["musicTaggerMarkers"] = cue_value
+	obj["tags"] = entries
+	if media_kind != "" { obj["musicTaggerKind"] = json.String(media_kind) }
+	if _, exists := obj["appName"]; !exists { obj["appName"] = json.String("TagSpaces") }
+	data, err := json.marshal(obj, {}, context.temp_allocator)
+	if err != nil { return "could not encode sidecar" }
+	dir := filepath.dir(sp)
+	if !os.exists(dir) && os.make_directory(dir) != nil { return "could not create sidecar folder" }
+	tmp := strings.concatenate({sp, ".tmp"}, context.temp_allocator)
+	if os.write_entire_file(tmp, data) != nil { return "could not write sidecar" }
+	if os.rename(tmp, sp) != nil { return "could not replace sidecar" }
+	return ""
+}
 
 // Reads a game name off the file name or the folders above it. Never guessed
 // from audio: two tracks from one game rarely sound alike.

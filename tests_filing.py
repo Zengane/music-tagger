@@ -104,6 +104,44 @@ fails += not check("the old key is gone", str(track) not in points)
 fails += not check("the file that never moved kept its own key", str(t3) in points)
 fails += not check("nothing else was invented", len(points) == 3, str(len(points)))
 
+# ── the folders a pack came out of ──
+#
+# Filing empties them, and they used to stay behind as husks named after albums
+# that had moved. The walk must climb while empty, stop dead at anything still
+# holding a file, and never touch the library root.
+tmp2 = Path(tempfile.mkdtemp(prefix="prunetest-"))
+lib2 = tmp2 / "library"
+deep = lib2 / "Untagged" / "Some OST" / "DISC 1"
+deep.mkdir(parents=True)
+(lib2 / "Chill").mkdir()
+(deep / ".ts").mkdir()
+song = deep / "only one.mp3"
+song.write_bytes(b"x")
+(deep / ".ts" / "only one.mp3.json").write_text(
+    json.dumps({"tags": [{"title": "Chill"}]}), encoding="utf-8")
+
+entry = organize.plan(song, lib2, "Chill")
+fails += not check("the plan carries the library", entry.get("library") == str(lib2))
+done = organize.apply(entry)
+fails += not check("it moved", done.get("moved") is True)
+fails += not check("the empty disc folder is gone", not deep.exists())
+fails += not check("and its empty parent too", not (lib2 / "Untagged" / "Some OST").exists())
+fails += not check("Untagged itself went, being empty", not (lib2 / "Untagged").exists())
+fails += not check("the library root survives", lib2.is_dir())
+fails += not check("and the destination is untouched", (lib2 / "Chill" / "only one.mp3").exists())
+
+# A folder with something still in it stops the walk.
+keep = lib2 / "Untagged2" / "Pack"
+keep.mkdir(parents=True)
+(keep / "sibling.mp3").write_bytes(b"y")
+song2 = keep / "second.mp3"
+song2.write_bytes(b"z")
+organize.apply(organize.plan(song2, lib2, "Chill"))
+fails += not check("a folder that still holds a file is kept", keep.is_dir())
+fails += not check("the sibling is untouched", (keep / "sibling.mp3").exists())
+
+shutil.rmtree(tmp2, ignore_errors=True)
+
 shutil.rmtree(tmp, ignore_errors=True)
 print("\n" + ("all checks passed" if fails == 0 else f"{fails} checks failed"))
 sys.exit(1 if fails else 0)

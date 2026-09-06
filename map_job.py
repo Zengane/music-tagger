@@ -181,7 +181,7 @@ def reduce_to_plane(X: np.ndarray, seed: int = 0) -> np.ndarray:
     # Perplexity is roughly "how many neighbours count as the neighbourhood".
     # Too low and the map shatters into confetti; too high and it collapses
     # into one blob. Thirty is the usual choice, capped for small libraries.
-    perplexity = float(max(5, min(30, (n - 1) / 3)))
+    perplexity = float(min(n - 1, max(5, min(30, (n - 1) / 3))))
     plane = TSNE(
         n_components=2,
         perplexity=perplexity,

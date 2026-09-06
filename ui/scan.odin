@@ -19,6 +19,9 @@ Scan_Request :: struct {
 	root:        string,
 	recursive:   bool,
 	include_sfx: bool,
+	additive: bool,
+	library_root: string,
+	folders: []string,
 }
 
 Scan_State :: struct {
@@ -29,6 +32,7 @@ Scan_State :: struct {
 	result:   Library,
 	err:      string,
 	thread:   ^thread.Thread,
+	save_epoch: int,
 }
 
 scan: Scan_State
@@ -41,14 +45,25 @@ scan_progress :: proc() -> int {
 // ignored rather than queued, because the only way to trigger it is a click.
 // Indices in an undo step point into `lib.tracks`, so they mean nothing once
 // a different library is loaded.
-start_scan :: proc(root: string, recursive := true, include_sfx := false) {
+start_scan :: proc(root: string, recursive := true, include_sfx := false, additive := false) {
+    if folder_copy.running { toast("Wait for the folder copy to finish"); return }
 	if scan.running { return }
-	undo_clear()
+	if job.phase == .Loading || job.phase == .Running { toast("finish or cancel tagging before importing"); return }
+	if lib.scanned { save_library_snapshot() }
 	scan.request = {
 		root        = strings.clone(root),
 		recursive   = recursive,
 		include_sfx = include_sfx,
+		additive = additive,
+		library_root = strings.clone(additive ? lib.root : root),
 	}
+	if !additive && strings.equal_fold(root, lib.root) {
+		scan.request.folders = make([]string, len(imported_folders))
+		for p, i in imported_folders { scan.request.folders[i] = strings.clone(p) }
+	} else if !additive {
+		scan.request.folders = snapshot_folders(root)
+	}
+	scan.save_epoch = sidecar_saves
 	scan.running = true
 	scan.done    = false
 	scan.err     = ""
@@ -60,12 +75,28 @@ start_scan :: proc(root: string, recursive := true, include_sfx := false) {
 poll_scan :: proc() -> (finished: bool) {
 	if !scan.running || !sync.atomic_load(&scan.done) { return false }
 
+	if job.phase == .Running || job.phase == .Loading { return false }
 	thread.join(scan.thread)
 	thread.destroy(scan.thread)
 	scan.thread  = nil
 	scan.running = false
 
+	defer delete(scan.request.root)
+	defer delete(scan.request.library_root)
+	defer delete(scan.request.folders)
+	defer { for p in scan.request.folders { delete(p) } }
 	if scan.err == "" {
+		same := strings.equal_fold(lib.root, scan.result.root) || scan.request.additive
+		if same { merge_scan_result() } else {
+			clear_imported_folders()
+			for p in scan.request.folders { append(&imported_folders, strings.clone(p)) }
+		}
+		if scan.request.additive {
+			known := false
+			for p in imported_folders { if strings.equal_fold(p, scan.request.root) { known = true } }
+			if !known && !path_under_root(lib.root, scan.request.root) { append(&imported_folders, strings.clone(scan.request.root)) }
+		}
+		undo_clear()
 		// Both of these read the library by index from elsewhere; they have to
 		// let go before the arena underneath them is freed.
 		wave_quiesce()
@@ -73,7 +104,15 @@ poll_scan :: proc() -> (finished: bool) {
 		reset_player()
 		free_library(&lib)
 		lib = scan.result
+		scan.result = {}
 		lib.scanned = true
+		// Dynamic allocators must refer to the live arena after the worker handoff.
+		for &t in lib.tracks {
+			t.tags.allocator = lib_allocator()
+			t.kinds.allocator = lib_allocator()
+			t.scores.allocator = lib_allocator()
+			t.cues.allocator = lib_allocator()
+		}
 
 		// Everything that remembers a track by its position has to let go.
 		//
@@ -89,19 +128,24 @@ poll_scan :: proc() -> (finished: bool) {
 		forget_track_indices()
 
 		count_tags()
+		for &t in lib.tracks { assign_closest_mood(&t) }
 		invalidate_dirty_count()
 		set_browse_folder("")
 		// Every waveform gets built in the background from here, so opening a
 		// track later is a file read instead of a wait.
 		begin_waveform_warmup()
 		features_pending = true
+		save_library_snapshot()
 	}
+	if scan.err != "" { free_library(&scan.result); toast(scan.err) }
 	return true
 }
 
 // Drops every reference to a track by position. Call after `lib` is replaced.
 @(private)
 forget_track_indices :: proc() {
+	marker_drag = -1
+	if app.tag_editor && app.editor_mode == .Edit_Marker { close_tag_editor() }
 	app.selected    = -1
 	app.press_index = -1
 	clear(&app.selection)
@@ -145,7 +189,30 @@ scan_worker :: proc() {
 	out.root   = strings.clone(scan.request.root, alloc)
 	out.tracks = make([dynamic]Track, 0, 2048)
 
-	walk_dir(&out, alloc, out.root, "")
+	if !os.is_dir(out.root) {
+		free_library(&out)
+		scan.err = "folder unavailable; keeping the current library"
+		sync.atomic_store(&scan.done, true)
+		return
+	}
+	prefix := scan.request.additive ? import_prefix(scan.request.library_root, out.root) : ""
+	walk_dir(&out, alloc, out.root, prefix)
+
+	for p in scan.request.folders {
+		if scan.request.recursive && path_under_root(out.root, p) { continue }
+		walk_dir(&out, alloc, p, import_prefix(out.root, p))
+	}
+	// Read waveform metadata on this worker, never on the drawing thread.
+	for &t in out.tracks {
+		if peaks_cache_valid(peak_key_of(&t)) {
+			if peaks, ok := peaks_load(&t); ok {
+				t.features = peaks.features
+				t.duration = peaks.duration
+				delete(peaks.values)
+			}
+		}
+		free_all(context.temp_allocator)
+	}
 
 	// Sort by the path shown in the list, so the order on screen matches the
 	// order on disk and arrow-key paging is predictable.
@@ -160,19 +227,19 @@ scan_worker :: proc() {
 @(private)
 walk_dir :: proc(out: ^Library, alloc: runtime.Allocator, dir: string, rel_prefix: string) {
 	handle, oerr := os.open(dir)
-	if oerr != nil { return }
+	if oerr != nil { scan.err = "could not read a folder; keeping the current library"; return }
 	defer os.close(handle)
 
 	entries, rerr := os.read_directory(handle, -1, context.temp_allocator)
-	if rerr != nil { return }
+	if rerr != nil { scan.err = "could not list a folder; keeping the current library"; return }
 
 	for e in entries {
 		if e.type == .Directory {
-			if !scan.request.recursive && rel_prefix != "" { continue }
+			if !scan.request.recursive { continue }
 			lower := strings.to_lower(e.name, context.temp_allocator)
 			// `.ts` holds the sidecars themselves; SFX has its own taxonomy
 			// and is skipped unless asked for.
-			if lower == ".ts" { continue }
+			if lower == ".ts" || lower == ".music-tagger-imports" { continue }
 			child_rel := rel_prefix == "" ? e.name : join_path({rel_prefix, e.name})
 			walk_dir(out, alloc, e.fullpath, child_rel)
 			continue
@@ -203,11 +270,12 @@ add_track :: proc(out: ^Library, alloc: runtime.Allocator, e: os.File_Info, rel,
 	// Effects are imported like everything else and marked, rather than
 	// skipped. They are a category to filter by, not a thing to hide: the
 	// music model is simply never pointed at them.
-	t.is_sfx = is_skipped_dir(strings.to_lower(rel_prefix, context.temp_allocator))
+	t.is_sfx = is_skipped_dir(strings.to_lower(rel_prefix, context.temp_allocator)) || is_skipped_dir(strings.to_lower(filepath.dir(t.path), context.temp_allocator))
 
 	t.tags.allocator  = alloc
 	t.kinds.allocator = alloc
 	load_tags_into(t.path, &t.tags, alloc)
+	load_track_cues(&t, alloc)
 	for tag in t.tags { append(&t.kinds, tag_kind(tag)) }
 
 	// Lowercase copies built now, so a keystroke never has to lowercase 1800
@@ -227,6 +295,10 @@ add_track :: proc(out: ^Library, alloc: runtime.Allocator, e: os.File_Info, rel,
 
 @(private)
 is_skipped_dir :: proc(lower_path: string) -> bool {
+    normalized, _ := strings.replace_all(lower_path, "\\", "/", context.temp_allocator)
+    for part in strings.split(normalized, "/", context.temp_allocator) {
+        if part == "sfx" || part == "sound effects" || part == "sound-effects" || part == "sound_effects" { return true }
+    }
 	for d in SKIP_DIRS {
 		dl := strings.to_lower(d, context.temp_allocator)
 		if lower_path == dl { return true }
@@ -269,3 +341,40 @@ project_root :: proc() -> string {
 	return cached
 }
 
+
+// Reconcile by path before freeing the old arena. Edits made while scanning
+// win over sidecars; unchanged audio keeps its already computed scores.
+merge_scan_result :: proc() {
+    out := &scan.result
+    alloc := virtual.arena_allocator(&out.arena)
+    old := make(map[string]int, context.temp_allocator)
+    seen := make(map[string]bool, context.temp_allocator)
+    for t, i in lib.tracks { old[strings.to_lower(t.path, context.temp_allocator)] = i }
+    unique := make([dynamic]Track, 0, len(out.tracks) + len(lib.tracks))
+    for fresh in out.tracks {
+        key := strings.to_lower(fresh.path, context.temp_allocator)
+        if seen[key] { continue }
+        seen[key] = true
+        t := fresh
+        if i, exists := old[key]; exists {
+            prev := &lib.tracks[i]
+            if prev.dirty || (prev.saved && sidecar_saves != scan.save_epoch) { t = clone_track(prev^, alloc) }
+            else if prev.size == t.size && prev.mtime == t.mtime {
+                copy := clone_track(prev^, alloc)
+                t.scored = copy.scored
+                t.scores = copy.scores
+                t.saved = copy.saved
+                if !t.features.valid { t.features = copy.features; t.duration = copy.duration }
+            }
+        }
+        append(&unique, t)
+    }
+    for t in lib.tracks {
+        key := strings.to_lower(t.path, context.temp_allocator)
+        if !seen[key] && (scan.request.additive || t.dirty) { append(&unique, clone_track(t, alloc)) }
+    }
+    delete(out.tracks)
+    out.tracks = unique
+    out.root = strings.clone(lib.root, alloc)
+    slice.sort_by(out.tracks[:], proc(a, b: Track) -> bool { return strings.compare(a.haystack, b.haystack) < 0 })
+}

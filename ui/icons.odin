@@ -84,9 +84,31 @@ draw_icon :: proc(icon: Icon, r: Rect, col: rl.Color) {
 	// Square, centred, and inset a little: Lucide's artwork nearly fills its
 	// 24-unit box, and a button's icon wants a breath of space around it.
 	size := min(r.width, r.height) * 0.86
+	#partial switch icon {
+	case .Span, .Scissors, .Export, .Import, .Speed, .Volume_High, .Volume_Low, .Volume_Mute:
+		size = min(r.width, r.height) * 0.64
+	}
 	scale := size / ICON_GRID
 	ox := r.x + (r.width - size) * 0.5
 	oy := r.y + (r.height - size) * 0.5
+
+	// Solid transport symbols stay legible at small dock sizes.
+	#partial switch icon {
+	case .Play:
+		tri({ox + size * 0.30, oy + size * 0.18}, {ox + size * 0.80, oy + size * 0.50}, {ox + size * 0.30, oy + size * 0.82}, col)
+		return
+	case .Pause:
+		fill_round(rect(ox + size * 0.25, oy + size * 0.20, size * 0.18, size * 0.60), col, 1)
+		fill_round(rect(ox + size * 0.57, oy + size * 0.20, size * 0.18, size * 0.60), col, 1)
+		return
+	case .Prev, .Next:
+		dir: f32 = icon == .Next ? 1 : -1
+		cx := ox + size * 0.5
+		tri({cx - dir * size * 0.24, oy + size * 0.20}, {cx + dir * size * 0.20, oy + size * 0.50}, {cx - dir * size * 0.24, oy + size * 0.80}, col)
+		fill(rect(cx + dir * size * 0.28 - size * 0.05, oy + size * 0.20, size * 0.10, size * 0.60), col)
+		return
+	case:
+	}
 
 	// The stroke thins with the icon but never disappears.
 	thickness := max(ICON_STROKE_W * scale, 1.2)
@@ -151,6 +173,10 @@ draw_icon :: proc(icon: Icon, r: Rect, col: rl.Color) {
 draw_panel_icon :: proc(icon: Icon, r: Rect, col: rl.Color, filled: bool) {
 	if filled {
 		size := min(r.width, r.height) * 0.86
+	#partial switch icon {
+	case .Span, .Scissors, .Export, .Import, .Speed, .Volume_High, .Volume_Low, .Volume_Mute:
+		size = min(r.width, r.height) * 0.64
+	}
 		scale := size / ICON_GRID
 		ox := r.x + (r.width - size) * 0.5
 		oy := r.y + (r.height - size) * 0.5

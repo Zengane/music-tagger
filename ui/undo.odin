@@ -158,7 +158,7 @@ undo_last :: proc() -> (label: string, count: int) {
 		// Clean before the step, clean again — unless something has been
 		// written since, in which case the file on disk may hold what is being
 		// undone and the track really does need saving.
-		t.dirty = entry.dirty || sidecar_saves != step.saves
+		t.dirty = t.cues_dirty || entry.dirty || sidecar_saves != step.saves
 		count += 1
 	}
 

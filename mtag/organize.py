@@ -56,6 +56,11 @@ def mood_folders(library) -> dict[str, Path]:
 
 def target_folder(library, mood: str) -> Path:
     """Where a track tagged `mood` belongs. Creates nothing."""
+    sfx_categories = {"Impacts", "Transitions", "Interface", "Footsteps", "Foley", "Ambience", "Weapons", "Vehicles", "Mechanical", "Creatures", "Voice", "Nature", "Magic", "Musical", "Liquid", "Fire", "Electricity", "Unsorted"}
+    if mood == "Untagged":
+        return Path(library) / "Untagged"
+    if mood.startswith("SFX/") and mood[4:] in sfx_categories:
+        return Path(library) / "SFX" / mood[4:]
     if mood not in MOOD_TAGS:
         raise ValueError(f"{mood!r} is not a Mood tag")
     return mood_folders(library).get(mood, Path(library) / mood)
@@ -84,7 +89,7 @@ def plan(filepath, library, mood: str) -> dict:
         status = "missing"
     elif src.parent.resolve() == dst_dir.resolve():
         status = "already-there"
-    elif dst.exists():
+    elif dst.exists() or sidecar_path(dst).exists():
         status = "collision"
     else:
         status = "ok"
@@ -92,10 +97,13 @@ def plan(filepath, library, mood: str) -> dict:
     return {
         "src": str(src),
         "dst": str(dst),
-        "folder": dst_dir.name,
+        "folder": mood if mood.startswith("SFX/") else dst_dir.name,
         "mood": mood,
         "status": status,
         "creates_folder": status == "ok" and not dst_dir.exists(),
+        # Carried so `apply` knows how far up it may tidy, without having to be
+        # told the library separately.
+        "library": str(Path(library)),
     }
 
 
@@ -108,7 +116,7 @@ def apply(entry: dict) -> dict:
     st = src.stat()  # read before the move; needed to re-key the embedding cache
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    if dst.exists():  # lost a race with something else
+    if dst.exists() or sidecar_path(dst).exists():  # lost a race with something else
         return {**entry, "moved": False, "status": "collision"}
     shutil.move(str(src), str(dst))
 
@@ -116,13 +124,12 @@ def apply(entry: dict) -> dict:
     src_side, dst_side = sidecar_path(src), sidecar_path(dst)
     if src_side.exists():
         dst_side.parent.mkdir(parents=True, exist_ok=True)
-        if dst_side.exists():
-            dst_side.unlink()
         shutil.move(str(src_side), str(dst_side))
 
     rekey_caches(src, dst, st.st_size, st.st_mtime)
-    _prune_empty(src.parent)
-    return {**entry, "moved": True}
+    lib = entry.get("library")
+    pruned = _prune_empty(src.parent, Path(lib) if lib else None)
+    return {**entry, "moved": True, "pruned": pruned}
 
 
 SOUNDMAP = Path(__file__).resolve().parent.parent / "model" / "soundmap.json"
@@ -169,16 +176,53 @@ def rekey_soundmap(pairs, path: Path = SOUNDMAP) -> int:
     return moved
 
 
-def _prune_empty(folder: Path) -> None:
-    """Drop a leftover empty .ts directory.
+def _prune_empty(folder: Path, library: Path | None = None) -> list[str]:
+    """Drop the folder a track came out of, once nothing is left in it.
 
-    The folder that held the track is left alone even if it's now empty — an
-    empty "Melancholic" is still a folder the user made, and deleting it is not
-    this tool's call.
+    Filing a pack empties the folders it arrived in — `Untagged/Some OST/DISC 1`
+    and then `Untagged/Some OST` — and those husks used to stay behind, so the
+    tree filled up with empty directories named after albums that had moved.
+
+    Walks upward while each level is empty and stops at the library root, which
+    is never removed however empty it gets. A folder still holding anything at
+    all stops the walk immediately, so nothing else is touched.
+
+    Returns the folders removed, for reporting.
     """
-    ts = folder / ".ts"
-    try:
-        if ts.is_dir() and not any(ts.iterdir()):
-            ts.rmdir()
-    except OSError:
-        pass  # in use, or not ours to remove
+    removed: list[str] = []
+    root = library.resolve() if library is not None else None
+    here = folder
+
+    for _ in range(8):  # deeper than any pack in practice
+        try:
+            here_resolved = here.resolve()
+        except OSError:
+            break
+
+        # Never the library itself, and never anything outside it. Without a
+        # library to compare against, do nothing at all rather than guess.
+        if root is None:
+            break
+        if here_resolved == root or root not in here_resolved.parents:
+            break
+
+        # TagSpaces keeps its sidecars in a `.ts` beside the audio. An empty one
+        # is bookkeeping, not content, so it does not count as "still in use".
+        ts = here / ".ts"
+        try:
+            if ts.is_dir() and not any(ts.iterdir()):
+                ts.rmdir()
+        except OSError:
+            pass
+
+        try:
+            if any(here.iterdir()):
+                break
+            here.rmdir()
+        except OSError:
+            break  # in use, or not ours to remove
+
+        removed.append(str(here))
+        here = here.parent
+
+    return removed
