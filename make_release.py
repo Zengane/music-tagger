@@ -158,14 +158,34 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
+rem ffmpeg is not optional. Every format is decoded through it, WAV and MP3
+rem included, so without it nothing can be analysed and no tags are produced.
+rem Fetched into bin\ here rather than asking anyone to edit their PATH.
+if exist "bin\ffmpeg.exe" goto :haveff
 where ffmpeg >nul 2>nul
+if not errorlevel 1 goto :haveff
+
+echo ffmpeg is needed to read audio. Downloading it (about 30 MB)...
+if not exist bin mkdir bin
+curl -L -o "%TEMP%\mt-ffmpeg.zip" "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 if errorlevel 1 (
     echo.
-    echo NOTE: ffmpeg was not found either. Without it, some audio formats will
-    echo not play and waveforms will not be drawn. Get it from ffmpeg.org and
-    echo put ffmpeg.exe and ffprobe.exe on your PATH.
+    echo Could not download it. Get ffmpeg from https://ffmpeg.org/download.html
+    echo and put ffmpeg.exe and ffprobe.exe into the "bin" folder next to
+    echo MusicTagger.exe. Nothing else needs changing.
     echo.
+    goto :haveff
 )
+tar -xf "%TEMP%\mt-ffmpeg.zip" -C "%TEMP%" 2>nul
+for /r "%TEMP%" %%F in (ffmpeg.exe ffprobe.exe) do @copy /y "%%F" bin\ >nul 2>nul
+del "%TEMP%\mt-ffmpeg.zip" >nul 2>nul
+if exist "bin\ffmpeg.exe" (
+    echo   ffmpeg is in place.
+) else (
+    echo   Could not unpack it. Put ffmpeg.exe and ffprobe.exe in the "bin"
+    echo   folder next to MusicTagger.exe yourself.
+)
+:haveff
 
 if not exist venv (
     echo Creating the environment. This takes a minute.
@@ -203,8 +223,12 @@ For the AI features
 Tagging, the sound maps, filing and folder imports run Python. Run setup.bat
 once. It needs Python 3.12+ on your PATH and downloads a few GB of packages.
 
-ffmpeg is also needed for waveforms and for anything that is not a plain
-16-bit WAV, MP3, OGG or FLAC. Put ffmpeg.exe and ffprobe.exe on your PATH.
+ffmpeg is required, not optional. Every audio file is decoded through it —
+WAV and MP3 included — so without it nothing can be analysed and tagging
+produces no tags at all. setup.bat downloads it for you. If that fails, get it
+from ffmpeg.org and put ffmpeg.exe and ffprobe.exe in a folder called "bin"
+next to MusicTagger.exe. Nothing else needs changing; you do not have to touch
+your PATH.
 
 What is in the box
 ------------------

@@ -21,8 +21,44 @@ import "core:thread"
 import "core:time"
 import rl "vendor:raylib"
 
-FFMPEG  :: "ffmpeg"
-FFPROBE :: "ffprobe"
+// Where ffmpeg is, in the order most likely to be right.
+//
+// A `bin` folder beside the .exe is looked at first, so the answer to "what
+// path do I put it on?" can be "drop the two files in this folder" — no
+// environment variables, no administrator. Falling back to the bare name lets
+// Windows search PATH as before.
+//
+// Everything decodes through ffmpeg, including plain WAV and MP3, so without
+// it the analysis produces one failure per file and no tags at all.
+@(private)
+tool_path :: proc(name: string) -> string {
+	local := join_path({project_root(), "bin", fmt.tprintf("%s.exe", name)})
+	if os.exists(local) { return local }
+	beside := join_path({project_root(), fmt.tprintf("%s.exe", name)})
+	if os.exists(beside) { return beside }
+	return name
+}
+
+ffmpeg_exe :: proc() -> string {
+	@(static) cached: string
+	if cached == "" { cached = strings.clone(tool_path("ffmpeg")) }
+	return cached
+}
+
+ffprobe_exe :: proc() -> string {
+	@(static) cached: string
+	if cached == "" { cached = strings.clone(tool_path("ffprobe")) }
+	return cached
+}
+
+// Whether anything can be decoded at all. The window says so rather than
+// letting every job fail one file at a time.
+ffmpeg_available :: proc() -> bool {
+	exe := ffmpeg_exe()
+	if os.exists(exe) { return true }
+	_, code, spawned := run_capture({exe, "-version"}, context.temp_allocator)
+	return spawned && code == 0
+}
 
 // Peaks are stored at this resolution regardless of track length. It is enough
 // detail to pick a hit out of a dense mix at full zoom, and 2000 bytes per
@@ -210,7 +246,7 @@ peaks_store :: proc(t: ^Track, p: Peaks) {
 
 probe_duration :: proc(path: string) -> f32 {
 	out, code, ok := run_capture({
-		FFPROBE, "-v", "error", "-show_entries", "format=duration",
+		ffprobe_exe(), "-v", "error", "-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1", path,
 	}, context.temp_allocator)
 	if !ok || code != 0 { return 0 }
@@ -233,7 +269,7 @@ peaks_generate_for :: proc(path: string) -> (p: Peaks, ok: bool) {
 	// Always decoded to two channels: a mono source comes back duplicated,
 	// which costs a little memory and means the drawing code has one case.
 	raw, code, spawned := run_capture({
-		FFMPEG, "-v", "error", "-nostdin", "-i", path,
+		ffmpeg_exe(), "-v", "error", "-nostdin", "-i", path,
 		"-f", "f32le", "-acodec", "pcm_f32le", "-ac", "2", "-ar",
 		fmt.tprintf("%d", PEAK_RATE), "-",
 	}, context.temp_allocator)
@@ -531,7 +567,7 @@ playable_path :: proc(t: ^Track) -> (path: string, ext: string, ok: bool) {
 	if os.exists(dest) { return dest, ".wav", true }
 
 	_, code, spawned := run_capture({
-		FFMPEG, "-v", "error", "-nostdin", "-y", "-i", t.path,
+		ffmpeg_exe(), "-v", "error", "-nostdin", "-y", "-i", t.path,
 		"-vn", "-acodec", "pcm_s16le", dest,
 	}, context.temp_allocator)
 	if !spawned || code != 0 { return "", "", false }
@@ -746,7 +782,7 @@ export_selection :: proc() -> (path: string, ok: bool) {
 	dest := join_path({cache_dir("clips"), sanitise_filename(name)}, context.allocator)
 
 	_, code, spawned := run_capture({
-		FFMPEG, "-v", "error", "-nostdin", "-y",
+		ffmpeg_exe(), "-v", "error", "-nostdin", "-y",
 		"-ss", fmt.tprintf("%.3f", player.sel_start), "-i", t.path,
 		"-t", fmt.tprintf("%.3f", player.sel_end - player.sel_start),
 		"-vn", "-acodec", "pcm_s16le", dest,

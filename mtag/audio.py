@@ -18,8 +18,45 @@ import numpy as np
 
 from .taxonomy import SKIP_DIRS, SKIP_NAME_PATTERNS
 
-FFMPEG = "ffmpeg"
-FFPROBE = "ffprobe"
+def _tool(name: str) -> str:
+    """Where to find ffmpeg, in the order most likely to be right.
+
+    Everything here decodes through ffmpeg — every format, including plain WAV
+    and MP3 — so without it nothing can be analysed at all. A user who skipped
+    it because they "only work with wav and mp3" got a tagging run that
+    reported a failure per file and applied nothing, which reads as the AI
+    being broken rather than as a missing program.
+
+    `bin/` beside the application is checked first so the answer to "what path
+    do I put it on?" can be "drop the two .exe files in this folder", which
+    needs no environment variables and no administrator.
+    """
+    import shutil
+
+    exe = f"{name}.exe" if os.name == "nt" else name
+
+    override = os.environ.get(f"MUSICTAGGER_{name.upper()}")
+    if override and Path(override).exists():
+        return override
+
+    here = Path(__file__).resolve().parent.parent
+    for candidate in (here / "bin" / exe, here / exe):
+        if candidate.exists():
+            return str(candidate)
+
+    return shutil.which(name) or name
+
+
+FFMPEG = _tool("ffmpeg")
+FFPROBE = _tool("ffprobe")
+
+
+def have_ffmpeg() -> tuple[bool, str]:
+    """Whether decoding will work at all, and where it would come from."""
+    import shutil
+
+    found = Path(FFMPEG).exists() or shutil.which(FFMPEG) is not None
+    return found, FFMPEG
 
 
 def _run_process(command, **kwargs):

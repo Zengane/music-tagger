@@ -66,6 +66,19 @@ def main() -> int:
                     help="report the model and device, embed nothing")
     args = ap.parse_args()
 
+    # Nothing can be decoded without ffmpeg — every format goes through it,
+    # including plain WAV and MP3. Said once and clearly, because the failure
+    # without this is one error per file and an empty result, which reads as
+    # the model being broken.
+    from mtag.audio import have_ffmpeg
+    ok_ffmpeg, where = have_ffmpeg()
+    if not ok_ffmpeg:
+        emit(event="error", message=(
+            "ffmpeg was not found, so no audio can be read. Put ffmpeg.exe and "
+            "ffprobe.exe in a 'bin' folder next to MusicTagger.exe, or on your "
+            "PATH, then try again."))
+        return 2
+
     from mtag.dataset import EmbeddingCache
     from mtag.model import MODEL_PATH, Tagger
 
