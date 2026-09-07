@@ -18,3 +18,7 @@ dist/
 # Local validation artifacts
 mtag-review.exe
 work/
+
+# Written at run time; a diagnostic, not source.
+logs/
+diagnose.txt
