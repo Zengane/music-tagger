@@ -1,215 +1,128 @@
-# Music Tagger v2
+# Music Tagger
 
-Auto-tags a music library with the Mood and Sound tags from a TagSpaces tag
-library, and writes them back as `.ts/*.json` sidecars.
+A desktop app for browsing, tagging and auditioning a large library of music
+and sound effects — built for finding the right cue quickly while editing
+video, rather than for organising files as an end in itself.
 
-Built for `H:\Media Browser\Mega Music Pack` — ~860 game-soundtrack tracks
-tagged for video editing.
+It tags tracks with a model trained on a real hand-tagged library, lays the
+whole collection out as a map you can navigate by ear, and sends a chosen span
+straight to the Premiere timeline.
 
-## What changed from v1
+Windows only. Written in [Odin](https://odin-lang.org) with raylib; the audio
+analysis is Python.
 
-v1 asked LAION-CLAP, zero-shot, "does this sound like *goofy silly playful
-cartoon comedic funny music*?" and thresholded the answer. That was never going
-to work, for five separate reasons:
+## What it does
 
-1. **It only heard 10 seconds.** `laion/clap-htsat-unfused`'s feature extractor
-   is configured with `max_length_s=10, truncation="rand_trunc"`. v1 decoded 60
-   seconds and the processor silently discarded fifty of them at random. Every
-   tag came from one arbitrary 10-second slice.
-2. **It ran on the CPU.** The venv had `torch==2.10.0+cpu`. `run.bat` probed
-   `torch.cuda.is_available()` *before* torch was installed, so the CUDA branch
-   misfired, and the later `pip install -r requirements.txt` could swap a CUDA
-   build back out for a CPU one anyway.
-3. **Min-max normalisation destroyed the scores.** Rescaling each category to
-   [0,1] per file forces exactly one mood to 1.0 and one to 0.0 in *every*
-   track, no matter what it sounds like.
-4. **Thresholds were fit on positives only** — the 20th percentile of positive
-   raw logits, with negative examples never consulted. Nothing stopped a
-   threshold from sitting below most of the library.
-5. **The vocabulary is personal.** "Build-Up", "Awkward", "Bombastic-Heavy" are
-   editing cues, not audio concepts. No zero-shot model knows what they mean
-   *here*.
+- **Tags music by listening to it.** A small trained model scores each track
+  against 33 mood and sound tags. Only tags whose accuracy was measured to be
+  good enough apply themselves; the rest are offered as suggestions, ranked.
+- **Tags are files, not a database.** Everything is written as TagSpaces
+  sidecars — one JSON file per track in a `.ts` folder beside the audio — so
+  your tags travel with your files and other tools can read them.
+- **Two maps.** One places tracks by the tags they carry; the other by how the
+  audio actually sounds, so it works on a folder nobody has tagged yet.
+- **Files music into folders by mood**, always showing you the plan first and
+  never overwriting anything.
+- **Sends a selection to Premiere** — the original media, with handles, placed
+  at the playhead.
+- **Sound effects** get filename and folder based suggestions, silence-based
+  splitting, and their own map.
 
-Meanwhile the library already contained ~857 hand-tagged tracks — 2583 tag
-assignments — that v1 used only to nudge thresholds.
+Nothing is written to your library until you press Save.
 
-v2 treats that as what it is: a labelled training set. It embeds each track with
-a frozen music encoder and fits one logistic regression per tag on the user's
-own labels. Tags are learned from examples, not from a text prompt.
+## Installing
 
-## How it works
+Download the release, unzip it anywhere, run `MusicTagger.exe`. Nothing is
+installed and nothing is written outside the folder — delete it to remove it.
 
-```
-audio ── ffmpeg ──> 12 windows spread across the whole track
-                          |
-                    music encoder (frozen)
-                          |
-                mean + std pooled, L2 normalised
-                          |
-        ┌─────────────────┴──────────────────┐
-   probe per tag                      zero-shot text
-   (>= 12 examples)                   (rarer tags)
-```
+For the AI features, run `setup.bat` once. It needs Python 3.12+ and downloads
+the Python environment and ffmpeg.
 
-- **Whole-track windows.** Twelve windows sampled evenly from start to end, so
-  intro, body and outro all count. The std half of the pooling captures how much
-  a track *changes*, which is the entire signal for a tag like Build-Up.
-- **One probe per tag.** Independent binary logistic regression, `C` chosen by
-  cross-validation, `class_weight="balanced"` so rare tags aren't drowned.
-- **Per-tag thresholds** tuned on out-of-fold predictions to maximise F-1.5.
-  Recall is favoured deliberately: a missing tag is invisible in TagSpaces, a
-  wrong one is one click to remove during review.
-- **Zero-shot fallback** for tags with fewer than 12 examples (Wintery, Trappy,
-  Romantic, Loss). Cosine similarity against the encoder's text tower, with the
-  threshold set at a quantile of the library's own score distribution so the tag
-  fires about 3x its current prevalence.
-- **Nothing else is touched.** Game tags, star ratings and emoji tags are read
-  from the existing sidecar and written straight back. The tagger's vocabulary is
-  only the Mood and Sound groups, so it can never assign a ⭐ or a star rating —
-  `tests.py` asserts both that they survive a write and that no rating, emoji or
-  Game tag appears in the vocabulary at all.
+**Two things worth knowing before you do:**
 
-## Filing into mood folders
+- The Python environment is about **3.5 GB**, and the models add several GB
+  more in `%USERPROFILE%\.cache\huggingface` — on your **C: drive**, wherever
+  you installed the app. Check you have room.
+- A CUDA GPU makes tagging roughly forty times faster. It works on the CPU;
+  it is just slow.
 
-The library is already arranged by mood — `Adventure/`, `Chill/`, `Tension/` —
-and folder names agree with sidecar mood tags 822 times out of 858. Ticking
-**move into mood folders on save** keeps that true for new files.
+If something does not work, run `diagnose.bat` and read `diagnose.txt`. The app
+also writes `logs\musictagger.log` on every run.
 
-A track carries 1.6 moods on average, so one has to be primary. The default is
-whichever mood the model scored highest; the dropdown above the Mood list
-overrides it per file.
+## Building
 
-Existing folders are reused rather than duplicated: `Build-Up` files land in the
-`Build up` folder that's already there, and matching is case-insensitive. Moods
-with no folder yet (Bombastic-Heavy, Hopeful, Loss) get one created on demand.
+Needs [Odin](https://odin-lang.org). With the app closed:
 
-Every move is planned and confirmed before anything happens: you get a count per
-destination folder, a list of any folders that would be created, and a note of
-anything skipped. The sidecar moves with its track, an empty `.ts` folder left
-behind is cleaned up, and a move that would land on an existing filename is
-refused rather than overwriting it. Folders you made are never deleted, even
-once empty.
-
-Tag categories are not stored in the sidecars — those only hold
-`{"title": "Epic", "type": "sidecar"}`. The Mood/Sound split comes from
-`Mega Music Pack tag library.json`, mirrored in `taxonomy.py`; a test fails if
-the two drift apart.
-
-## Setup
-
-```bash
-run.bat
+```bat
+build.bat
 ```
 
-Creates a Python 3.12 venv and installs everything. Python 3.13+ is not
-supported — the CUDA torch wheels lag behind.
+Or directly:
 
-`ffmpeg` must be on `PATH` (it already is at `C:\Program Files\ffmpeg\bin`).
-
-## Desktop app
-
-The review UI now runs inside a native WebView2 desktop window rather than
-opening the system browser. Use `run.bat`, or open the built executable at
-`dist\MusicTagger.exe`. The executable is a small launcher for the project's
-managed Python environment, so the several-gigabyte ML runtime is not copied
-into a second bundle. `build.bat` rebuilds it after installing PyInstaller.
-
-The desktop UI adds:
-
-- a local AND search over filenames and sidecar tags, for example
-  `tag:Epic tag:Orchestral game:Celeste`;
-- cached waveform previews with click-to-seek playback;
-- a node view that clusters files by their primary mood or SFX category and
-  lets you jump back to a file;
-- an **include SFX** mode. SFX is intentionally manual for now and uses broad
-  production labels such as `Impact`, `Whoosh`, `Interface`, `Foley`, `Voice`,
-  `Ambience`, `One-Shot` and `Loop`.
-
-### Recommended SFX workflow
-
-Tag an effect by retrieval purpose first (what an editor would search for),
-then add only the material/action labels that disambiguate it. Keep one-shot
-and loop labels separate, and avoid turning every audible detail into a tag.
-This keeps searches useful and leaves room for a future dedicated SFX model;
-the music model is never trained on SFX labels.
-
-The current desktop host is deliberately small and uses the Windows WebView2
-runtime. Rewriting the trained Python/torch pipeline in Odin would be a much
-larger portability and model-runtime project, so it is not part of this first
-desktop slice.
-
-## Usage
-
-Compare encoders on your own labels:
-
-```bash
-venv\Scripts\python.exe bakeoff.py "H:\Media Browser\Mega Music Pack"
+```bat
+odin build ui -out:MusicTagger.exe -o:speed -subsystem:windows -resource:app.rc
+odin build ui -out:mtag-test.exe -o:speed
 ```
 
-Train the tagger with the winning encoder:
+## Checking it works
 
-```bash
-venv\Scripts\python.exe train.py "H:\Media Browser\Mega Music Pack" --encoder fusion
+Most of what this app claims is measurable, and there is a mode for each.
+None of them need the window.
+
+```bat
+mtag-test.exe --selftest "<your library folder>"    everything
+mtag-test.exe --audiocheck "<library>"    which files can be played as-is
+mtag-test.exe --rescancheck "<library>"   the library being replaced underneath
+mtag-test.exe --filingcheck "<library>"   plan, move, rescan, rebuild
+mtag-test.exe --windowcheck               the layout at every window width
+mtag-test.exe --games / --soundmap / --drops / --benchmark
+
+venv\Scripts\python.exe tests_filing.py   moving files, on a throwaway copy
+venv\Scripts\python.exe sfx_map_bench.py  how coherent the effects map is
+venv\Scripts\python.exe tests.py          the Python side
 ```
 
-Review and write tags:
+## How good is the tagging, honestly
 
-```bash
-run.bat
+Thresholds are set per tag at a measured precision of 0.60. On the library it
+was trained on it applies 2.9 tags per track where a person applied 3.1 — of
+those, about 1.8 are right and 1.2 want removing. Three tags never apply
+themselves because their probes never reached that precision.
+
+The effects map is weaker, and the number is worth stating plainly. Asking
+whether a sound's nearest neighbour on the map comes from the same family, over
+6568 effects in 93 filename-derived families:
+
+| | |
+|---|---|
+| chance | 0.16% |
+| what the encoder knows | 32.7% |
+| the map, as 2D t-SNE | 9.4% |
+| the map now, as 2D UMAP | 16.2% |
+
+So the layout improved by about 70%, and the remaining gap is the encoder's,
+not the projection's. `sfx_map_bench.py` reproduces all of that.
+
+## Training your own model
+
+The shipped model was trained on one person's library and their vocabulary.
+Yours will differ. With a few hundred hand-tagged tracks:
+
+```bat
+venv\Scripts\python.exe train.py "<your library folder>" --encoder fusion
 ```
 
-Point it at a folder of new music, hit **Analyze all**, skim the suggestions,
-click any tag to toggle it, then **Save all analyzed**. Every correction lands
-in a sidecar, so hitting **Retrain** afterwards makes the next batch better.
+`docs/why-v2.md` explains why the first version of this did not work, which is
+most of what is worth knowing about the approach.
 
-## Encoders
+## What is bundled
 
-| name | model | text tower | notes |
-|---|---|---|---|
-| `fusion` | muq-mulan + muq + clap-music | yes | **default**, the three concatenated |
-| `muq-mulan` | `OpenMuQ/MuQ-MuLan-large` | yes | music-text contrastive, 79.3 ROC-AUC zero-shot on MagnaTagATune |
-| `muq` | `OpenMuQ/MuQ-large-msd-iter` | no | music SSL, probe only |
-| `mert` | `m-a-p/MERT-v1-330M` | no | music SSL, probe only |
-| `clap-music` | `laion/larger_clap_music_and_speech` | yes | what v1 used, wired up correctly this time |
+`premiere/ZenDrop` is a small Adobe CEP panel that receives clips from the app.
+Its installer copies it into your Adobe extensions folder and sets a per-user
+registry flag so Premiere will load an unsigned panel. Both are reversible by
+deleting the folder and the flag.
 
-Scored on the library's own 857 labelled tracks:
+## Licence
 
-| encoder | dim | macro AP | macro AUC | precision | recall |
-|---|---|---|---|---|---|
-| **fusion** | 4096 | **0.591** | 0.917 | 0.51 | 0.74 |
-| muq-mulan | 1024 | 0.559 | 0.909 | 0.48 | 0.73 |
-| clap-music | 1024 | 0.526 | 0.893 | 0.44 | 0.73 |
-| muq | 2048 | 0.521 | 0.889 | 0.44 | 0.71 |
-| mert | 2048 | 0.445 | 0.871 | 0.40 | 0.69 |
-
-No single encoder wins everywhere, which is why the default is all three at once.
-MuQ-MuLan takes most tags; MuQ is better at Fantasy, Ambient and Medieval;
-CLAP-music is much better at Chiptuney. Fusing them moves Fantasy +0.16,
-Medieval +0.13 and Chiptuney +0.13 over MuQ-MuLan alone.
-
-MERT is left out of the fusion on purpose: adding it was worth +0.003 macro AP
-for another 2048 dimensions and another pass over every file.
-
-Zero-shot fallback reads the text-aligned part's mean block specifically — for
-the fusion that's columns 0:512, MuQ-MuLan's half, not the first half of the
-concatenation.
-
-MuQ weights are CC-BY-NC 4.0 — fine for a personal library, not for a product.
-
-Embeddings are cached under `cache/<encoder>/` keyed by path, size and mtime, so
-re-running anything is cheap and only re-encoded files get re-embedded.
-
-## Layout
-
-```
-mtag/taxonomy.py   tag vocabulary and zero-shot prompts
-mtag/sidecar.py    TagSpaces sidecar read/write
-mtag/audio.py      ffmpeg decode, whole-track windowing
-mtag/encoders.py   pluggable encoders
-mtag/dataset.py    label collection, embedding cache
-mtag/probes.py     per-tag training, CV, threshold selection
-mtag/model.py      the saved tagger, zero-shot fallback heads
-bakeoff.py         encoder comparison
-train.py           final training
-app.py             review UI
-```
+MIT — see [LICENSE](LICENSE). The models it downloads and ffmpeg are not
+distributed with it and carry their own licences.

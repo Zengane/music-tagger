@@ -46,7 +46,7 @@ if errorlevel 1 (
 if not exist "model\tagger.pkl" (
     echo.
     echo No trained model yet. Train one first, e.g.:
-    echo   venv\Scripts\python.exe train.py "H:\Media Browser\Mega Music Pack"
+    echo   venv\Scripts\python.exe train.py "<your library folder>"
     echo.
     pause & exit /b 1
 )

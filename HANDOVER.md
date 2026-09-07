@@ -4,10 +4,10 @@ Updated: 2026-09-06
 
 ## Project
 
-- Repository: `C:\Users\simsi\music-tagger-v2`
+- Repository: `<the app folder>`
 - Native executable: `MusicTagger.exe`
-- Music library used during development: `H:\Media Browser\Mega Music Pack`
-- Predecessor project: `C:\Users\simsi\music-tagger` (reference only; do not modify).
+- Music library used during development: `<your library folder>`
+- Predecessor project: `<your user folder>\music-tagger` (reference only; do not modify).
 - UI and application code are Odin in `ui/`; Python handles audio analysis, tagging, imports, filing, and SFX splitting.
 
 The worktree is deliberately uncommitted and contains substantial user/Codex changes. Preserve all existing edits; do not reset or checkout files wholesale.

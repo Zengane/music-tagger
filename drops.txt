@@ -10,7 +10,7 @@
 #
 # Then run:
 #
-#     mtag-test.exe --dropcheck "H:\Media Browser\Mega Music Pack"
+#     mtag-test.exe --dropcheck "<your library folder>"
 #
 # It prints how far off each one is, and one number for the whole set. That
 # number is the thing to make smaller — every change to the detector can be

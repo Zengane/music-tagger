@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-ROOT = Path(r"H:\Media Browser\Mega Music Pack\SFX")
+ROOT = Path(r"<your library folder>\SFX")
 EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}
 STOP = {"sfx", "the", "and", "a", "of", "bpm", "short", "long", "small", "big"}
 

@@ -1,6 +1,6 @@
 r"""How many tags you get, and how many of them are wrong, at each setting.
 
-    venv\Scripts\python.exe sweep.py "H:\Media Browser\Mega Music Pack"
+    venv\Scripts\python.exe sweep.py "<your library folder>"
 
 The tagger has one dial that matters — how sure it has to be before it applies a
 tag — and every complaint about it so far has been about where that dial sits.

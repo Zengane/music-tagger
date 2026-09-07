@@ -13,7 +13,7 @@ Usage:
 
 The file holds one move per line, mood and path separated by a tab:
 
-    Chill\tH:\Media Browser\Mega Music Pack\Untagged\Foo.mp3
+    Chill\t<your library folder>\Untagged\Foo.mp3
 
 Two phases on purpose. `--plan` touches nothing and reports what each move
 would do, so the caller can show it and ask; `--apply` carries them out. Moving

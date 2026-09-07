@@ -58,6 +58,6 @@ if errorlevel 1 (
 
 echo.
 echo Ready: %~dp0MusicTagger.exe
-echo Check it with: mtag-test.exe --selftest "H:\Media Browser\Mega Music Pack"
+echo Check it with: mtag-test.exe --selftest "<your library folder>"
 pause
 

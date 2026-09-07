@@ -9,7 +9,7 @@ alone, and the plan pass must move nothing at all. Run it with:
 import json, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-ROOT = Path(r"C:\Users\simsi\music-tagger-v2")
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

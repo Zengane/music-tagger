@@ -26,3 +26,6 @@ diagnose.txt
 # Build leftovers.
 MusicTagger.new.exe
 *.obj
+
+# Per-user state, not source.
+prefs.json

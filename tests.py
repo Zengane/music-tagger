@@ -211,7 +211,7 @@ def test_organize():
 
 def test_taxonomy_matches_library():
     print("taxonomy vs TagSpaces tag library")
-    lib = Path(r"H:\Media Browser\Mega Music Pack\Mega Music Pack tag library.json")
+    lib = Path(r"<your library folder>\Mega Music Pack tag library.json")
     if not lib.exists():
         print("  SKIP  tag library not reachable")
         return
