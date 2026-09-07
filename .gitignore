@@ -22,3 +22,7 @@ work/
 # Written at run time; a diagnostic, not source.
 logs/
 diagnose.txt
+
+# Build leftovers.
+MusicTagger.new.exe
+*.obj
