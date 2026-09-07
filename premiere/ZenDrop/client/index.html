@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Zen Drop</title>
+<style>
+    html, body {
+        margin: 0; padding: 0; height: 100%;
+        background: #232323; color: #d8d8d8;
+        font-family: "Segoe UI", Tahoma, sans-serif; font-size: 12px;
+        overflow: hidden;
+    }
+    #wrap { display: flex; flex-direction: column; height: 100%; padding: 10px; box-sizing: border-box; }
+    header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    header h1 { font-size: 13px; font-weight: 600; margin: 0; flex: 1; letter-spacing: .3px; }
+    button {
+        background: #3b3b3b; color: #e4e4e4; border: 1px solid #4d4d4d;
+        border-radius: 3px; padding: 5px 9px; font-size: 12px; cursor: pointer;
+    }
+    button:hover { background: #474747; }
+    button:active { background: #2d2d2d; }
+    button:disabled { opacity: .45; cursor: default; }
+    button.primary { background: #2d6cb5; border-color: #3579c6; }
+    button.primary:hover { background: #3579c6; }
+    #gear { padding: 4px 8px; }
+    .row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+    .seg { display: flex; flex: 1; border: 1px solid #4d4d4d; border-radius: 3px; overflow: hidden; }
+    .seg button { flex: 1; border: 0; border-radius: 0; background: #303030; }
+    .seg button.on { background: #2d6cb5; }
+    .label { color: #8f8f8f; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
+    #status, #listener { font-size: 11px; color: #a5a5a5; margin-bottom: 6px; line-height: 1.5; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #b04a4a; margin-right: 5px; vertical-align: middle; }
+    .dot.up { background: #4aa85a; }
+    #log {
+        flex: 1; min-height: 60px; overflow-y: auto; background: #1b1b1b;
+        border: 1px solid #383838; border-radius: 3px; padding: 6px;
+        font-family: Consolas, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap;
+    }
+    #log .err { color: #e07b7b; }
+    #log .ok { color: #8fca97; }
+    #log .dim { color: #7a7a7a; }
+</style>
+</head>
+<body>
+<div id="wrap">
+    <header>
+        <h1>Zen Drop</h1>
+        <button id="gear" title="Settings">&#9881;</button>
+    </header>
+
+    <div class="label">Drop mode</div>
+    <div class="row">
+        <div class="seg">
+            <button id="modeTimeline">Timeline</button>
+            <button id="modeSource">Source Monitor</button>
+        </div>
+    </div>
+
+    <div class="row">
+        <button id="place" class="primary" style="flex:1">Place from Source Monitor</button>
+    </div>
+
+    <div id="status">&nbsp;</div>
+    <div id="listener"><span class="dot" id="dot"></span><span id="listenerText">starting...</span></div>
+
+    <div id="log"></div>
+</div>
+
+<script src="./CSInterface.js"></script>
+<script src="./prefs.js"></script>
+<script src="./main.js"></script>
+</body>
+</html>

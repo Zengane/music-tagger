@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="11.0" ExtensionBundleId="com.zengane.zendrop"
+    ExtensionBundleVersion="1.0.0" ExtensionBundleName="Zen Drop"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <ExtensionList>
+        <Extension Id="com.zengane.zendrop.panel" Version="1.0.0" />
+        <Extension Id="com.zengane.zendrop.settings" Version="1.0.0" />
+    </ExtensionList>
+    <ExecutionEnvironment>
+        <HostList>
+            <Host Name="PPRO" Version="[15.0,99.9]" />
+        </HostList>
+        <LocaleList>
+            <Locale Code="All" />
+        </LocaleList>
+        <RequiredRuntimeList>
+            <RequiredRuntime Name="CSXS" Version="11.0" />
+        </RequiredRuntimeList>
+    </ExecutionEnvironment>
+    <DispatchInfoList>
+        <Extension Id="com.zengane.zendrop.panel">
+            <DispatchInfo>
+                <Resources>
+                    <MainPath>./client/index.html</MainPath>
+                    <ScriptPath>./host/host.jsx</ScriptPath>
+                    <CEFCommandLine>
+                        <Parameter>--enable-nodejs</Parameter>
+                        <Parameter>--mixed-context</Parameter>
+                    </CEFCommandLine>
+                </Resources>
+                <Lifecycle>
+                    <AutoVisible>true</AutoVisible>
+                </Lifecycle>
+                <UI>
+                    <Type>Panel</Type>
+                    <Menu>Zen Drop</Menu>
+                    <Geometry>
+                        <Size><Height>420</Height><Width>320</Width></Size>
+                        <MinSize><Height>260</Height><Width>260</Width></MinSize>
+                    </Geometry>
+                </UI>
+            </DispatchInfo>
+        </Extension>
+
+        <!--
+          Settings dialog. No <Menu> on purpose: it is opened from the panel's
+          gear button, so it never shows up under Window > Extensions as a
+          second panel with nothing to apply to.
+        -->
+        <Extension Id="com.zengane.zendrop.settings">
+            <DispatchInfo>
+                <Resources>
+                    <MainPath>./client/settings.html</MainPath>
+                    <CEFCommandLine>
+                        <Parameter>--enable-nodejs</Parameter>
+                        <Parameter>--mixed-context</Parameter>
+                    </CEFCommandLine>
+                </Resources>
+                <Lifecycle>
+                    <AutoVisible>false</AutoVisible>
+                </Lifecycle>
+                <UI>
+                    <Type>ModalDialog</Type>
+                    <Geometry>
+                        <Size><Height>520</Height><Width>440</Width></Size>
+                    </Geometry>
+                </UI>
+            </DispatchInfo>
+        </Extension>
+    </DispatchInfoList>
+</ExtensionManifest>

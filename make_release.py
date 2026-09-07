@@ -46,7 +46,10 @@ FILES = [
     "sfx_split_job.py",
     "requirements.txt",
 ]
-DIRS = ["mtag"]
+# `premiere/` carries the Zen Drop panel and its installer. It is what
+# "Send to Premiere" talks to — one HTTP GET to 127.0.0.1 — and without it that
+# menu item has nothing listening at the other end.
+DIRS = ["mtag", "premiere"]
 MODEL = ["tagger.pkl"]
 
 
@@ -139,6 +142,13 @@ def main() -> int:
             print(f"\nERROR: {n} game tags are still in the shipped library")
             return 1
     print("\nno game tags in the shipped vocabulary")
+
+    panel = OUT / "premiere" / "ZenDrop" / "CSXS" / "manifest.xml"
+    installer = OUT / "premiere" / "install-premiere-extension.bat"
+    if not panel.exists() or not installer.exists():
+        print("ERROR: the Premiere panel did not make it into the package")
+        return 1
+    print("the Premiere panel and its installer are in the package")
     return 0
 
 
@@ -215,7 +225,20 @@ First run
 1.  Start MusicTagger.exe.
 2.  Press + in the sidebar and point it at a folder of audio.
 
-That is enough to browse, play, tag by hand, and send clips to Premiere.
+That is enough to browse, play and tag by hand.
+
+Sending clips to Premiere
+-------------------------
+
+Run premiere\install-premiere-extension.bat with Premiere closed. It copies the
+Zen Drop panel into your Adobe extensions folder and lets Premiere load it.
+
+Then in Premiere: Window > Extensions > Zen Drop. Leave the panel open — it is
+the listener, so nothing arrives while it is closed. Right click a track in
+Music Tagger and choose "Send to Premiere".
+
+The panel listens on 127.0.0.1 only. Nothing is reachable from off the machine
+and nothing is sent anywhere.
 
 For the AI features
 -------------------
