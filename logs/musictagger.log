@@ -1,0 +1,14 @@
+04:48:02  ---- Music Tagger starting ----
+04:48:02  app folder   C:\Users\simsi\music-tagger-v2
+04:48:02  python       C:\Users\simsi\music-tagger-v2\venv\Scripts\python.exe
+04:48:02  model        C:\Users\simsi\music-tagger-v2\model\tagger.pkl
+04:48:02  ffmpeg       ffmpeg
+04:48:02  tag_job.py   C:\Users\simsi\music-tagger-v2\tag_job.py
+04:48:04  analyze: 1 files, script C:\Users\simsi\music-tagger-v2\tag_job.py
+04:48:04    | {"event": "loading", "detail": "loading tag model"}
+04:48:04    | {"event": "ready", "encoder": "fusion", "device": "on demand", "tags": 33, "zero_shot": 4}
+04:48:04    | {"event": "total", "count": 1}
+04:48:04    | {"event": "ready", "encoder": "fusion", "device": "cache (no GPU)", "tags": 33, "zero_shot": 4}
+04:48:04    | {"event": "result", "path": "H:\\Media Browser\\Mega Music Pack\\Adventure\\ Jett Mance - meadow roaming.mp3", "selected": ["Adventure", "Chill", "Goofy", "Childish", "Folk"], "scores": [{"tag": "Adventure", "score": 0.9619, "threshold": 0.7254, "zero_shot": false}, {"tag": "Awkward", "score": 0.390… (2776 more characters)
+04:48:04    | {"event": "done", "analyzed": 1, "failed": 0}
+04:48:04  analyze finished: exit 0, 1 tagged, 0 failed

@@ -46,6 +46,23 @@ def emit(**payload) -> None:
     sys.stdout.flush()
 
 
+def package_versions() -> dict:
+    """What this run is actually built on.
+
+    MuQ, transformers and torch have to agree, and when they do not the failure
+    is a RuntimeError about an attribute nobody has heard of. Having the three
+    numbers in the log turns that into a one-line diagnosis.
+    """
+    out = {}
+    for name in ("torch", "transformers", "numpy", "muq"):
+        try:
+            module = __import__(name)
+            out[name] = getattr(module, "__version__", "unknown")
+        except Exception as e:
+            out[name] = f"missing ({e.__class__.__name__})"
+    return out
+
+
 def device_name() -> str:
     try:
         import torch
@@ -78,6 +95,10 @@ def main() -> int:
             "ffprobe.exe in a 'bin' folder next to MusicTagger.exe, or on your "
             "PATH, then try again."))
         return 2
+
+    # Recorded on every run, because a version mismatch in this chain is
+    # invisible from inside the app and cost a round trip to find once.
+    emit(event="versions", **package_versions())
 
     from mtag.dataset import EmbeddingCache
     from mtag.model import MODEL_PATH, Tagger

@@ -9,12 +9,38 @@ torch==2.13.0+cu130
 torchvision==0.28.0+cu130
 torchaudio==2.11.0+cu130
 
-muq>=0.1.0
-transformers>=4.40
-scikit-learn>=1.4
-numpy>=1.26
-librosa>=0.10
-soundfile>=0.12
+# The model chain is pinned, not floated.
+#
+# `transformers>=4.40` was the whole requirement for a while, so every machine
+# resolved to whatever was newest that day. On one of them MuQ died with
+#
+#     RuntimeError: muq: 'EasyDict' object has no attribute '_attn_implementation'
+#
+# MuQ hands transformers an EasyDict as its config, and whether that is accepted
+# depends entirely on which transformers is installed. The other two encoders
+# were fine, so nothing failed loudly — the fused vector simply could never be
+# completed, and every file came back as an error while the run reported that it
+# had finished.
+#
+# These are the versions this app is known to work with. Float them again only
+# alongside a tagging run that proves it still works.
+transformers==5.14.1
+tokenizers==0.22.2
+muq==0.1.0
+x-clip==0.14.4
+easydict==1.13
+nnaudio==0.3.4
+einops==0.8.2
+
+numpy==2.4.4
+scipy==1.18.0
+scikit-learn==1.9.0
+umap-learn==0.5.12
+numba==0.66.0
+llvmlite==0.48.0
+
+librosa==0.11.0
+soundfile==0.14.0
+
 flask>=3.0
 pywebview>=5.4
-umap-learn

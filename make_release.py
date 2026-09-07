@@ -110,6 +110,7 @@ def main() -> int:
         missing.append("tag_library.json")
 
     (OUT / "setup.bat").write_text(SETUP_BAT, encoding="utf-8")
+    (OUT / "diagnose.bat").write_text(DIAGNOSE_BAT, encoding="utf-8")
     (OUT / "README.txt").write_text(README, encoding="utf-8")
 
     if missing:
@@ -213,6 +214,54 @@ echo Done. Start MusicTagger.exe.
 pause
 """
 
+DIAGNOSE_BAT = r"""@echo off
+rem Answers "why is tagging doing nothing" without needing the app to start.
+rem Writes diagnose.txt next to this file; send that when reporting a problem.
+setlocal
+cd /d "%~dp0"
+set "OUT=%~dp0diagnose.txt"
+
+> "%OUT%" echo Music Tagger diagnosis
+>>"%OUT%" echo Folder: %~dp0
+>>"%OUT%" echo.
+
+>>"%OUT%" echo == Python ==
+if exist "venv\Scripts\python.exe" (
+    >>"%OUT%" echo venv found
+    venv\Scripts\python.exe -c "import sys;print('version', sys.version)" >>"%OUT%" 2>&1
+    venv\Scripts\python.exe -c "import torch;print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" >>"%OUT%" 2>&1
+    venv\Scripts\python.exe -c "import transformers, numpy, sklearn;print('transformers', transformers.__version__);print('numpy', numpy.__version__)" >>"%OUT%" 2>&1
+    venv\Scripts\python.exe -c "import muq;print('muq', getattr(muq,'__version__','unknown'))" >>"%OUT%" 2>&1
+    venv\Scripts\python.exe -c "from muq import MuQ;print('muq imports ok')" >>"%OUT%" 2>&1
+) else (
+    >>"%OUT%" echo venv MISSING - run setup.bat
+)
+>>"%OUT%" echo.
+
+>>"%OUT%" echo == ffmpeg ==
+if exist "bin\ffmpeg.exe" (
+    >>"%OUT%" echo found in bin) else (
+    where ffmpeg >>"%OUT%" 2>&1
+    if errorlevel 1 >>"%OUT%" echo NOT FOUND - nothing can be decoded, so tagging will produce nothing
+)
+>>"%OUT%" echo.
+
+>>"%OUT%" echo == Model ==
+if exist "model\tagger.pkl" ( >>"%OUT%" echo model\tagger.pkl found ) else ( >>"%OUT%" echo model\tagger.pkl MISSING )
+>>"%OUT%" echo.
+
+>>"%OUT%" echo == The tagging job, asked to describe itself ==
+if exist "venv\Scripts\python.exe" venv\Scripts\python.exe tag_job.py --probe >>"%OUT%" 2>&1
+>>"%OUT%" echo.
+
+>>"%OUT%" echo == Last run of the app ==
+if exist "logs\musictagger.log" ( type "logs\musictagger.log" >>"%OUT%" 2>&1 ) else ( >>"%OUT%" echo no log yet - start MusicTagger.exe and press Analyze once )
+
+echo Written to diagnose.txt
+echo Send that file when reporting a problem.
+pause
+"""
+
 README = r"""Music Tagger
 ============
 
@@ -264,6 +313,15 @@ model\tagger.pkl   A tagger trained on a real, hand-tagged library. It scores
 tag_library.json   The Mood, Sound and SFX vocabularies. The Game group is
                    empty on purpose: game tags belong to whoever made the
                    library, and yours will be your own.
+
+If something does not work
+--------------------------
+
+Run diagnose.bat. It writes diagnose.txt saying what is installed, what is
+missing, and what the tagging job said last time. Send that file.
+
+The app also keeps logs\musictagger.log, which records every run: the command
+it launched, everything the job printed, and the code it exited with.
 
 Your tags are written into TagSpaces sidecars (a .ts folder beside the audio),
 so they travel with the files and other tools can read them.

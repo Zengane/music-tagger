@@ -106,10 +106,19 @@ start_analyze :: proc(indices: []int) {
 	job.list_file = list_path
 
 	script := job.for_effects ? sfx_script() : job_script()
+	logf("analyze: %d files, script %s", len(indices), script)
+	if !os.exists(python_exe()) {
+		logf("analyze: python is missing at %s", python_exe())
+		job.phase = .Failed
+		set_owned(&job.err, "Python is not set up — run setup.bat, then try again")
+		toast("Python is not set up. Run setup.bat next to MusicTagger.exe.")
+		return
+	}
 	stream, ok := stream_start({
 		python_exe(), script, "--paths-from", list_path,
 	}, project_root())
 	if !ok {
+		logf("analyze: could not start %s", python_exe())
 		job.phase = .Failed
 		set_owned(&job.err, fmt.tprintf("could not start %s", python_exe()))
 		return
@@ -174,6 +183,8 @@ finish_job :: proc() {
 	stream_close(&job.stream)
 	cleanup_job_file()
 
+	logf("analyze finished: exit %d, %d tagged, %d failed", code, job.done, job.failed)
+
 	if job.phase == .Failed {
 		// An error line already explained it; keep that message.
 	} else if code != 0 && job.done == 0 {
@@ -185,11 +196,28 @@ finish_job :: proc() {
 		job.phase  = .Done
 		set_owned(&job.detail, "")
 	}
+
+	// Said out loud, not left on a status line that is gone in a frame.
+	//
+	// A run that reports success and applies nothing is the failure that wasted
+	// the most time: it looks like the model having no opinion rather than like
+	// something being wrong with the machine.
+	if job.phase == .Failed {
+		toast(fmt.tprintf("Tagging failed: %s — see logs/musictagger.log", job.err))
+	} else if job.done == 0 && job.failed > 0 {
+		toast(fmt.tprintf("Nothing could be read: %d files failed — see logs/musictagger.log",
+		                  job.failed))
+	} else if job.failed > 0 {
+		toast(fmt.tprintf("Tagged %d, %d could not be read — see logs/musictagger.log",
+		                  job.done, job.failed))
+	}
+
 	undo_commit(fmt.tprintf("tagged %d files", job.done))
 }
 
 @(private)
 consume_output :: proc(chunk: []byte) {
+	log_job_output(chunk)
 	append(&job.partial, ..chunk)
 
 	// Work through every complete line, leaving any tail for the next frame.

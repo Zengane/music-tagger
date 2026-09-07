@@ -183,6 +183,9 @@ main :: proc() {
 	if len(os.args) > 1 && os.args[1] == "--filingcheck" {
 		os.exit(run_filing_check(len(os.args) > 2 ? os.args[2] : ""))
 	}
+	if len(os.args) > 1 && os.args[1] == "--logcheck" {
+		os.exit(run_log_check(len(os.args) > 2 ? os.args[2] : ""))
+	}
 	if len(os.args) > 1 && os.args[1] == "--audiocheck" {
 		os.exit(run_audio_check(len(os.args) > 2 ? os.args[2] : ""))
 	}
@@ -256,6 +259,7 @@ main :: proc() {
 	install_live_resize()
 	defer remove_live_resize()
 	init_audio()
+	log_environment()
 	set_volume(prefs.volume)
 	defer rl.CloseAudioDevice()
 	start_wave_worker()
