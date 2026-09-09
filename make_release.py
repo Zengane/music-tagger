@@ -162,11 +162,59 @@ echo   tagging, the sound maps, filing, and importing folders.
 echo Browsing, playing and tagging by hand work without it.
 echo.
 
+rem The Python version is checked, not assumed.
+rem
+rem This used to test only that `python` existed. On a machine with 3.10 the
+rem install then failed deep inside pip with a wall of ignored numpy versions
+rem and "No matching distribution found for numpy==2.4.4" — which says nothing
+rem about Python at all. numpy 2.3 needs 3.11 and 2.5 needs 3.12, so the real
+rem message was three screens up and in someone else's words.
+rem
+rem `py -3.12` is tried before plain `python`, because a machine that has both
+rem an old default and a good one is common and does not need a new install.
+
+set "PY="
+call :trypy py -3.12
+if not defined PY call :trypy py -3.13
+if not defined PY call :trypy python
+if defined PY goto :havepy
+
+echo.
+echo   Music Tagger needs Python 3.12 or 3.13.
 where python >nul 2>nul
-if errorlevel 1 (
-    echo Python was not found. Install Python 3.12 or newer from python.org,
-    echo tick "Add python.exe to PATH" during setup, then run this again.
-    pause & exit /b 1
+if not errorlevel 1 (
+    for /f "tokens=*" %%V in ('python -V 2^>^&1') do echo   You have: %%V
+)
+echo.
+choice /c YN /m "Install Python 3.12 now with winget"
+if errorlevel 2 goto :nopy
+where winget >nul 2>nul
+if errorlevel 1 goto :nopy
+winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
+call :trypy py -3.12
+if defined PY goto :havepy
+
+:nopy
+echo.
+echo   Get Python 3.12 from https://www.python.org/downloads/
+echo   Tick "Add python.exe to PATH" while installing, then run this again.
+echo.
+pause & exit /b 1
+
+:havepy
+for /f "tokens=*" %%V in ('%PY% -V 2^>^&1') do echo Using %%V
+
+rem A venv built by the wrong Python cannot be fixed by installing into it.
+if exist "venv\Scripts\python.exe" (
+    venv\Scripts\python.exe -c "import sys;sys.exit(0 if (3,12)<=sys.version_info<(3,14) else 1)" >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo   The existing venv folder was built with an unsupported Python.
+        echo   It has to be replaced. Nothing else in this folder is touched.
+        choice /c YN /m "Delete venv and rebuild it"
+        if errorlevel 2 ( echo Left alone. Nothing was changed. & pause & exit /b 1 )
+        rmdir /s /q venv
+    )
 )
 
 rem ffmpeg is not optional. Every format is decoded through it, WAV and MP3
@@ -200,18 +248,31 @@ if exist "bin\ffmpeg.exe" (
 
 if not exist venv (
     echo Creating the environment. This takes a minute.
-    python -m venv venv
+    %PY% -m venv venv
     if errorlevel 1 ( echo Could not create venv. & pause & exit /b 1 )
 )
 
 echo Installing packages. This downloads a few GB and takes a while.
+echo Several GB also land in your user folder on C:, whichever drive this is on.
 venv\Scripts\python.exe -m pip install --upgrade pip
 venv\Scripts\python.exe -m pip install -r requirements.txt
-if errorlevel 1 ( echo Install failed. & pause & exit /b 1 )
+if errorlevel 1 (
+    echo.
+    echo Install failed. Run diagnose.bat and read diagnose.txt.
+    pause & exit /b 1
+)
 
 echo.
 echo Done. Start MusicTagger.exe.
 pause
+exit /b 0
+
+rem Sets PY to the given command when it is a Python this app can use.
+rem Called as `call :trypy py -3.12` or `call :trypy python`.
+:trypy
+%* -c "import sys;sys.exit(0 if (3,12)<=sys.version_info<(3,14) else 1)" >nul 2>nul
+if not errorlevel 1 set "PY=%*"
+exit /b 0
 """
 
 DIAGNOSE_BAT = r"""@echo off
@@ -228,6 +289,7 @@ set "OUT=%~dp0diagnose.txt"
 >>"%OUT%" echo == Python ==
 if exist "venv\Scripts\python.exe" (
     >>"%OUT%" echo venv found
+    venv\Scripts\python.exe -c "import sys;v=sys.version_info;print('SUPPORTED' if (3,12)<=v<(3,14) else 'UNSUPPORTED - needs 3.12 or 3.13, rerun setup.bat')" >>"%OUT%" 2>&1
     venv\Scripts\python.exe -c "import sys;print('version', sys.version)" >>"%OUT%" 2>&1
     venv\Scripts\python.exe -c "import torch;print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" >>"%OUT%" 2>&1
     venv\Scripts\python.exe -c "import transformers, numpy, sklearn;print('transformers', transformers.__version__);print('numpy', numpy.__version__)" >>"%OUT%" 2>&1
@@ -236,6 +298,11 @@ if exist "venv\Scripts\python.exe" (
 ) else (
     >>"%OUT%" echo venv MISSING - run setup.bat
 )
+>>"%OUT%" echo.
+>>"%OUT%" echo == Python on PATH ==
+where python >>"%OUT%" 2>&1
+python -V >>"%OUT%" 2>&1
+py -0p >>"%OUT%" 2>&1
 >>"%OUT%" echo.
 
 >>"%OUT%" echo == ffmpeg ==
