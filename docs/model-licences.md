@@ -39,6 +39,37 @@ The effects side is already clean.
 | Odin, raylib | BSD-like / zlib | Fine. |
 | torch, transformers, numpy, scikit-learn, umap-learn | BSD / Apache-2.0 / MIT | Fine. |
 
+## Replacing MuQ
+
+Checked 2026-09-09, after finding MuQ is non-commercial.
+
+| Model | Licence | Sellable | Note |
+|---|---|---|---|
+| [m-a-p/MERT-v1-330M](https://huggingface.co/m-a-p/MERT-v1-330M) | CC-BY-NC-4.0 | **No** | Already implemented in `encoders.py` and already ruled out for tagging. Ruled out again, for licence. |
+| [mispeech/dasheng-base](https://huggingface.co/mispeech/dasheng-base) | **Apache-2.0** | **Yes** | 272,000 hours of speech, music and environmental audio. Strong on HEAR, which includes music tasks. The leading candidate. Also `dasheng-0.6B` and `dasheng-1.2B`. |
+
+**First, though: the music map may not need replacing at all.**
+
+`map_job.py` does not project raw embeddings. It runs each track through the
+trained probes and projects the **33 tag scores** — and measured that as better
+than raw embeddings (0.66 against 0.75, lower being better).
+
+So the map's quality follows the *probes*, not directly the encoder underneath.
+If CLAP-only tagging holds up, the map holds up with it. The encoder question
+and the map question are the same question, and it is answered by the retrain
+in `roadmap.md` §1, not by finding a MuQ replacement.
+
+The order to try, cheapest first:
+
+1. **CLAP alone.** Already cached, one retrain, no downloads.
+2. **CLAP + Dasheng.** A new encoder to add and one full embedding pass, but
+   the fusion shape and everything downstream stays as it is.
+3. **Something else**, only if both of those measurably lose too much.
+
+Measure the map, not just the tagging. `sfx_map_bench.py` already shows how:
+take the user's own tags as families, and ask how often a track's nearest
+neighbour on the map shares one.
+
 ## Candidates, not yet checked
 
 Verify each before use. Licences on the hub do change between versions.
