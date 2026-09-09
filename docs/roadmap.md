@@ -1,11 +1,24 @@
 # Expanding to a general file browser, and selling it
 
-Written 2026-09-09. A plan, not a promise. The numbers in it that are measured
-say so; the rest are estimates and should be treated as such.
+Written 2026-09-09, revised the same day after a conversation that changed the
+order. A plan, not a promise. The numbers in it that are measured say so; the
+rest are estimates and should be treated as such.
 
-The goal: the same app, but it browses images, video, 3D models and text as
-well as audio, lays them all out on the map, and is sold rather than given
-away. Everything stays local.
+**The goal:** one tool for everyone who works with files that are hard to name
+— 3D artists, designers, editors, and music people to the extent the good
+proprietary tools leave room. It browses images, video, 3D models, vector art
+and text as well as audio, lays them all out on the map, and runs on Windows,
+macOS and Linux. Everything stays local.
+
+**Selling comes later.** Plugins are nearly ready to sell and come first, so
+the licence problem in §1 is not urgent — but it is written down first anyway,
+because it decides which models are worth building on and that shapes
+everything after it.
+
+**Two install sizes, not fewer features.** A small, less accurate build and a
+large, more accurate one. Nobody loses functionality because their disk is
+small; they lose precision, and they are told which. This is a better answer
+than the one this document originally gave.
 
 ---
 
@@ -51,7 +64,9 @@ Three outcomes:
 - **Much worse** — the music tagging stays a free/non-commercial feature and
   the paid product leads with the other modalities.
 
-**Do this first.** It is a day of work and it decides what the product is.
+Worth doing before any real weight is put on the music side — not because
+selling is imminent, but because building further on a model that can never
+ship is the expensive mistake. It is a day of work and needs no GPU time.
 
 ### A rule for everything added from here
 
@@ -127,6 +142,20 @@ product, so treat it as an optional external tool the way ffmpeg is treated.
 
 Estimate this one loosely. Format coverage is where it will bite.
 
+### Step 4b — vector art (2–3 days, alongside 3D)
+Designers' files. Rasterise, then encode as an image — the same trick again.
+
+- **SVG** — `resvg` (MPL-2.0) is fast, self-contained and renders correctly.
+  Prefer it to `cairosvg` (LGPL) and `librsvg` (LGPL), which are usable but
+  carry linking conditions worth avoiding in a closed product.
+- **AI and EPS** — modern `.ai` files are PDF underneath, so `pdfium` (BSD)
+  reads most of them. **Avoid Ghostscript: it is AGPL**, which is the worst
+  possible licence to link into something sold.
+- **PDF** — the same `pdfium` path, first page as the thumbnail.
+
+Do not promise perfect fidelity. A thumbnail good enough to recognise and
+embed is the requirement, not a print-accurate render.
+
 ### Step 5 — text (4–6 days)
 Two separate features, and they should not be confused:
 
@@ -138,16 +167,80 @@ Two separate features, and they should not be confused:
 
 ---
 
+## 3b. Windows, macOS and Linux
+
+Measured on 2026-09-09, not estimated:
+
+    8 of 56 Odin files touch the Windows API
+    2,419 lines of 22,878 — about 11%
+    320 Windows API calls in total
+
+**The other 89% is already portable.** Odin and raylib both run on all three.
+The Python side is portable already: two places check `os.name`, and both are
+handled correctly today.
+
+What has to be rewritten, easiest first:
+
+| File | Lines of Win32 | What it does | Porting it |
+|---|---|---|---|
+| `recycle.odin` | 10 calls | send to the recycle bin | Easy. Trash on macOS, the XDG trash spec on Linux. |
+| `clipboard.odin` | 31 | copy files and text | Easy for text — raylib does it. File clipboard is per-OS. |
+| `dragimage.odin` | 34 | the picture under the cursor while dragging | Cosmetic. Can ship without it at first. |
+| `liveresize.odin` | 35 | keep drawing while the window is resized | Windows solves a Windows problem here. The others may need nothing. |
+| `subprocess.odin` | 40 | run the Python jobs, read their output | Moderate. `posix_spawn` plus pipes; the shape stays the same. |
+| `titlebar.odin` | 78 | the custom title bar | Moderate — **or free**, by using native decorations off Windows. Recommended. |
+| `dragdrop.odin` | 88 | **drag a file out into another app** | The hard one. macOS needs `NSDraggingSource`, Linux needs XDND. |
+
+`dragdrop.odin` is both the hardest to port and the most valuable feature for
+every audience named above — dragging a clip into Premiere, a texture into
+Blender, a reference into Figma. Budget for it properly rather than hoping.
+
+Also: four `.bat` scripts need shell equivalents, and the Premiere panel is
+Windows and macOS only, which Adobe decided, not us.
+
+**Rough estimate: 2–3 weeks**, most of it in drag-and-drop and packaging. Best
+done *after* the file kinds are general (Step 1) and *before* the code grows
+much more Windows-specific.
+
+---
+
+## 3c. Two builds, small and large
+
+Chosen deliberately over cutting features. Everyone gets every feature; what
+changes is how much precision and disk it costs.
+
+|  | Small | Large |
+|---|---|---|
+| Runtime | ONNX Runtime | PyTorch + CUDA |
+| Models | quantised, int8 | full precision |
+| Rough size | 300–600 MB | 6–10 GB |
+| Speed | CPU-usable | much faster with a GPU |
+| Accuracy | lower, and **stated** | the measured numbers |
+
+Two things this must not do:
+
+1. **Pretend they are the same.** The app should say which build it is and what
+   that costs. "Small build: about 5% lower tagging accuracy" is honest and
+   fine. Silence is not.
+2. **Split the caches.** An embedding made by the int8 model is not comparable
+   to one from the full model. Cache keys must include which build made them,
+   or a user who upgrades gets a silently corrupt map. This is exactly the
+   class of bug that has already bitten twice here.
+
+The conversion work is the unknown. Most of these models export to ONNX
+cleanly; some do not, and finding out which is the first task.
+
+---
+
 ## 4. The things that will actually hurt
 
 Ranked by how likely they are to sink it, not by how hard they are.
 
-1. **Install size.** The Python environment is already ~3.5 GB, plus several GB
-   of models landing on C: regardless of install drive. That is already too much
-   for a free tool given to friends. For something sold it is a refund. Worth
-   investigating ONNX Runtime with quantised models — often a tenth of the size
-   and no torch at all. This may be the single most valuable engineering work in
-   the whole plan.
+1. **Install size — now a build choice, not a cut.** See §3c. The large build
+   stays large and honest; the small one exists so nobody is turned away by a
+   6 GB download. The risk moves from "too big to sell" to "two builds to keep
+   in step", which is a better problem but not a free one. The cache-key trap
+   in §3c is the part that will bite.
 2. **Code signing.** The unsigned build was already quarantined by Defender as
    `Trojan:Win32/Wacatac.B!ml`. For a paid product that is fatal. A certificate
    is £100–400/year and there is no way around it.
@@ -158,8 +251,14 @@ Ranked by how likely they are to sink it, not by how hard they are.
    until logging was added. Paying customers will produce more. The
    `diagnose.bat` and log work already done is the right instinct; keep
    extending it.
-5. **Scope.** "Alternative file manager" competes with Adobe Bridge, Eagle and
-   Soundly. The map is the thing none of them have. Lead with it.
+5. **Scope, which is now wider.** Serving 3D artists, designers, editors and
+   music people means five sets of file formats, five sets of expectations, and
+   competitors in each: Adobe Bridge, Eagle, Soundly, Connecter, Kitbash
+   managers. **The map is the thing none of them have.** Lead with it, and
+   resist becoming a worse version of any one of them.
+6. **Three platforms triples the testing.** Every check that exists today runs
+   on Windows only. `--selftest` and friends have to run on all three, ideally
+   automatically, or the ports will rot between releases.
 
 ---
 
@@ -182,22 +281,45 @@ Worth knowing before anything is rewritten:
 | | |
 |---|---|
 | Step 0, the licence decision | 1 day |
-| Steps 1–3, kinds + images + video | 7–10 days |
+| Step 1, general file kinds | 2–3 days |
+| Step 2, images | 3–4 days |
+| Step 3, video | 2–3 days |
 | Step 4, 3D | 4–6 days |
+| Step 4b, vector art | 2–3 days |
 | Step 5, text | 4–6 days |
-| Install size and packaging | unknown, possibly the biggest item |
+| macOS and Linux | 2–3 weeks |
+| The small ONNX build | unknown, likely 1–2 weeks |
+| Packaging and installers, three platforms | unknown |
 
-Three to four weeks of focused work to have images, video and 3D on the map,
-assuming the music licence question resolves cleanly. The packaging work is
-genuinely unestimated and could equal all of the above.
+**Six to eight weeks** for everything on the map on Windows, plus two to three
+more for the other platforms. The two unknowns at the bottom are genuine — they
+could add as much again, and neither can be estimated honestly until the first
+model is actually converted and the first .app is actually built.
 
 ---
 
 ## 7. The first three things to do
 
-1. Retrain on CLAP alone and compare. Decides the product.
-2. Write `docs/model-licences.md` and record what is already known.
-3. Prototype the image encoder on a folder of images with no UI at all —
-   embed, project, measure whether the neighbours make sense, the way
-   `sfx_map_bench.py` does. If the map is not good on images, none of the rest
-   matters.
+Selling is not imminent, so these are ordered by *what would waste the most
+work if it turned out badly*, not by what is most urgent.
+
+1. **Prototype the image encoder on a folder of images, with no UI at all.**
+   Embed, project to 2D, and measure whether the neighbours make sense — the
+   way `sfx_map_bench.py` already does for effects. Two days.
+
+   This is first because **the whole product rests on one claim**: that a map
+   of files placed by content is genuinely useful. It is proven for audio. It
+   is only assumed for images, and the effects map measured 16.2% where the
+   encoder knew 32.7%, so the projection step is not free. If images map badly,
+   that is worth knowing before six weeks go into it.
+
+2. **Retrain on CLAP alone and compare.** One day, no GPU. Decides whether the
+   music side can ever be sold, and therefore whether to keep investing in it.
+
+3. **Convert one model to ONNX and measure both size and accuracy.** The small
+   build in §3c is the difference between a product people will download and
+   one they will not, and every estimate about it is currently a guess.
+
+Steps 1 and 3 are both *experiments with a number at the end*, and both can be
+thrown away cheaply. That is the right shape for the first work on something
+this size.
