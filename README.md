@@ -11,6 +11,9 @@ straight to the Premiere timeline.
 Windows only. Written in [Odin](https://odin-lang.org) with raylib; the audio
 analysis is Python.
 
+**New here?** [docs/overview.md](docs/overview.md) describes what the app does
+and why, without the build instructions.
+
 ## What it does
 
 - **Tags music by listening to it.** A small trained model scores each track
