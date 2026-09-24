@@ -24,7 +24,30 @@ Tag_Kind :: enum u8 {
 	SFX,
 	Game,
 	Favorite, // star emoji, user-curated, never rewritten
+	Visual,   // images, video, 3D and documents: what they show or say
 }
+
+// What a file is, by its extension. Decides which analysis it gets, which
+// filter it shows under, and whether there is anything to play.
+File_Kind :: enum u8 {
+	Audio,
+	Image,
+	Video,
+	Model,    // 3D
+	Document,
+}
+
+file_kind_of_ext :: proc(ext: string) -> (File_Kind, bool) {
+	if slice.contains(AUDIO_EXTS, ext)    { return .Audio, true }
+	if slice.contains(IMAGE_EXTS, ext)    { return .Image, true }
+	if slice.contains(VIDEO_EXTS, ext)    { return .Video, true }
+	if slice.contains(MODEL_EXTS, ext)    { return .Model, true }
+	if slice.contains(DOCUMENT_EXTS, ext) { return .Document, true }
+	return .Audio, false
+}
+
+// Whether the player can do anything with it.
+is_audio :: proc(t: ^Track) -> bool { return t.kind == .Audio }
 
 Cue :: struct { at: f32, name: string }
 
@@ -38,12 +61,19 @@ Track :: struct {
 	haystack:  string, // lowercased relative path, built once for search
 	name_low:  string, // lowercased file name, for tighter fuzzy matching
 	tag_hay:   string, // lowercased tags joined by spaces, rebuilt when tags change
+	text_hay:  string, // lowercased caption and OCR text, for media files
 	size:      i64,
 	mtime:     i64,
 	tags:      [dynamic]string,
 	kinds:     [dynamic]Tag_Kind,
 	media_kind: string, // explicit sidecar override: music or sfx
-	is_sfx:    bool, // sits under a directory the music taxonomy skips
+	kind:      File_Kind,
+	is_sfx:    bool, // audio under a directory the music taxonomy skips
+	// Filled in by a media analysis run, or read from the sidecar.
+	caption:   string, // what the picture shows, one or two sentences
+	ocr:       string, // text read out of the picture
+	description_dirty: bool, // caption changed and not yet written
+	thumb_state: u8,         // see thumbs.odin
 	duration:  f32,  // seconds; 0 until a waveform or the player learns it
 	// How the sound behaves over time, read from the peaks cache. This is what
 	// browsing by feel sorts on, and where the effect shape tags come from.
@@ -68,6 +98,7 @@ Library :: struct {
 	arena:   virtual.Arena,
 	// Tag name -> how many tracks carry it. Drives the counts in the rail.
 	counts:  map[string]int,
+	kinds:   bit_set[File_Kind], // which kinds of file are here; kept by count_tags
 	scanned: bool,
 }
 
@@ -109,6 +140,7 @@ tag_color :: proc(kind: Tag_Kind) -> rl.Color {
 	case .SFX:      return SFX_C
 	case .Game:     return GAME_C
 	case .Favorite: return FAV_C
+	case .Visual:   return VISUAL_C
 	case .Other:    return OTHER_C
 	}
 	return OTHER_C
@@ -145,6 +177,14 @@ rebuild_tag_haystack :: proc(t: ^Track) {
 	// Retagging a track a hundred times leaves a hundred short strings in that
 	// arena, which is a trade worth making for never touching a free.
 	t.tag_hay = strings.clone(strings.to_string(b), lib_allocator())
+}
+
+// What a picture shows and says, searchable like its name. A meme is found by
+// its caption text without any model running at search time.
+rebuild_text_haystack :: proc(t: ^Track, alloc := context.allocator) {
+	if t.caption == "" && t.ocr == "" { t.text_hay = ""; return }
+	joined := strings.concatenate({t.caption, " ", t.ocr}, context.temp_allocator)
+	t.text_hay = strings.clone(strings.to_lower(joined, context.temp_allocator), alloc)
 }
 
 has_game_tag :: proc(titles: []string) -> bool {
@@ -327,7 +367,12 @@ write_sidecar :: proc(track_path: string, tags: []string, game := "") -> (err: s
 
 // Manual editing owns the complete tag list. Preserve the rest of the JSON
 // document, including fields and per-tag properties supplied by other tools.
-write_track_tags :: proc(path: string, tags: []string, cues: []Cue = nil, media_kind: string = "") -> string {
+// `caption` fills the TagSpaces description only when it is empty: a
+// description someone wrote is never replaced by a machine's. `ocr` is kept in
+// its own key, so text read out of a picture travels with the file and stays
+// searchable without the cache.
+write_track_tags :: proc(path: string, tags: []string, cues: []Cue = nil, media_kind: string = "",
+                         caption: string = "", ocr: string = "") -> string {
 	sp := sidecar_path(path, context.temp_allocator)
 	obj := make(json.Object, context.temp_allocator)
 	if raw, err := os.read_entire_file(sp, context.temp_allocator); err == nil {
@@ -358,6 +403,11 @@ write_track_tags :: proc(path: string, tags: []string, cues: []Cue = nil, media_
 	obj["musicTaggerMarkers"] = cue_value
 	obj["tags"] = entries
 	if media_kind != "" { obj["musicTaggerKind"] = json.String(media_kind) }
+	if caption != "" {
+		existing, _ := obj["description"].(json.String)
+		if strings.trim_space(string(existing)) == "" { obj["description"] = json.String(caption) }
+	}
+	if ocr != "" { obj["musicTaggerText"] = json.String(ocr) }
 	if _, exists := obj["appName"]; !exists { obj["appName"] = json.String("TagSpaces") }
 	data, err := json.marshal(obj, {}, context.temp_allocator)
 	if err != nil { return "could not encode sidecar" }

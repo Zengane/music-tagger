@@ -155,8 +155,10 @@ forget_track_indices :: proc() {
 	// are freed here rather than merely marked out of date.
 	reset_tagging_rows()
 
-	// The map's dots are one per track.
+	// The map's dots are one per track, and so are the thumbnails.
 	invalidate_nodes()
+	clear_thumbnails()
+	restart_search_server()
 
 	// A job still running is reporting on tracks that have moved. Its results
 	// are matched by path, but its target list is not.
@@ -247,7 +249,7 @@ walk_dir :: proc(out: ^Library, alloc: runtime.Allocator, dir: string, rel_prefi
 		if e.type != .Regular { continue }
 
 		ext := strings.to_lower(filepath.ext(e.name), context.temp_allocator)
-		if !slice.contains(AUDIO_EXTS, ext) { continue }
+		if _, known := file_kind_of_ext(ext); !known { continue }
 
 		lower_name := strings.to_lower(e.name, context.temp_allocator)
 		if is_skipped_name(lower_name) { continue }
@@ -267,10 +269,12 @@ add_track :: proc(out: ^Library, alloc: runtime.Allocator, e: os.File_Info, rel,
 	t.ext   = strings.clone(ext, alloc)
 	t.size  = e.size
 	t.mtime = e.modification_time._nsec
+	t.kind, _ = file_kind_of_ext(ext)
 	// Effects are imported like everything else and marked, rather than
 	// skipped. They are a category to filter by, not a thing to hide: the
-	// music model is simply never pointed at them.
-	t.is_sfx = is_skipped_dir(strings.to_lower(rel_prefix, context.temp_allocator)) || is_skipped_dir(strings.to_lower(filepath.dir(t.path), context.temp_allocator))
+	// music model is simply never pointed at them. Only audio can be an
+	// effect; a picture in an SFX folder is still a picture.
+	t.is_sfx = t.kind == .Audio && (is_skipped_dir(strings.to_lower(rel_prefix, context.temp_allocator)) || is_skipped_dir(strings.to_lower(filepath.dir(t.path), context.temp_allocator)))
 
 	t.tags.allocator  = alloc
 	t.kinds.allocator = alloc
@@ -289,6 +293,7 @@ add_track :: proc(out: ^Library, alloc: runtime.Allocator, e: os.File_Info, rel,
 		strings.write_string(&tb, strings.to_lower(tag, context.temp_allocator))
 	}
 	t.tag_hay = strings.clone(strings.to_string(tb), alloc)
+	rebuild_text_haystack(&t, alloc)
 
 	append(&out.tracks, t)
 }
@@ -326,7 +331,9 @@ is_skipped_name :: proc(lower_name: string) -> bool {
 count_tags :: proc() {
 	if lib.counts != nil { delete(lib.counts) }
 	lib.counts = make(map[string]int)
+	lib.kinds = {}
 	for &t in lib.tracks {
+		lib.kinds += {t.kind}
 		for tag in t.tags {
 			lib.counts[tag] = lib.counts[tag] + 1
 		}

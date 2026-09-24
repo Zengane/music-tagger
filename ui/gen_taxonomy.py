@@ -13,7 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from mtag import kinds as K  # noqa: E402
 from mtag import sfxtax  # noqa: E402
+from mtag.media import vocab as media_vocab  # noqa: E402
 from mtag import taxonomy as tx  # noqa: E402
 
 
@@ -90,6 +92,19 @@ def main() -> None:
         slice_of("SFX_INTENT_TAGS", sfxtax.SFX_INTENT),
         "\n",
         phrases_of("SFX_INTENT_PHRASES", tx.SFX_INTENT_PHRASES),
+        "\n",
+        # File kinds by extension, from mtag/kinds.py.
+        slice_of("IMAGE_EXTS", K.EXTENSIONS[K.IMAGE]),
+        "\n",
+        slice_of("VIDEO_EXTS", K.EXTENSIONS[K.VIDEO]),
+        "\n",
+        slice_of("MODEL_EXTS", K.EXTENSIONS[K.MODEL]),
+        "\n",
+        slice_of("DOCUMENT_EXTS", K.EXTENSIONS[K.DOCUMENT]),
+        "\n",
+        # The vocabulary for images, video, 3D and documents, from
+        # mtag/media/vocab.py and mtag/media/measure.py.
+        sfx_groups_of("MEDIA_GROUPS", list(media_vocab.all_tags().items())),
     ]
     dest = ROOT / "ui" / "taxonomy.odin"
     dest.write_text("".join(out), encoding="utf-8")

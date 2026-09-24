@@ -194,11 +194,21 @@ draw_tile :: proc(r: Rect, track_index: int) {
 	else if over           { outline_round(r, LINE, 6) }
 	if over { ui.hover_cursor = .POINTING_HAND }
 
-	// The waveform fills the top of the tile.
-	wave := rect(r.x + px(6), r.y + px(6), r.width - px(12), r.height * 0.46)
+	// The waveform fills the top of the tile; for a picture, the picture does,
+	// and it gets more of the tile, because the picture is the point.
+	wave := rect(r.x + px(6), r.y + px(6), r.width - px(12), r.height * (has_thumbnail(t) ? 0.6 : 0.46))
 	fill_round(wave, WAVE_BG, 4)
 
-	if p, ok := grid_peaks(track_index); ok {
+	if has_thumbnail(t) {
+		if tex, ok := thumbnail(track_index); ok {
+			draw_texture_fit(tex, inset(wave, px(2)))
+		} else {
+			msg := strings.clone_to_cstring(kind_label(t), context.temp_allocator)
+			mw := text_w(.Bold, msg, FS_SMALL)
+			draw_text_mid(.Bold, msg, wave.x + (wave.width - mw) * 0.5, wave.y, wave.height,
+			              FS_SMALL, TEXT_FAINT)
+		}
+	} else if p, ok := grid_peaks(track_index); ok {
 		columns := max(int(wave.width), 1)
 		values := peak_channel(p, 0)
 		mid := wave.y + wave.height * 0.5

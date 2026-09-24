@@ -344,7 +344,8 @@ wave: Wave_Job = {want = -1, active = -1, ready = -1}
 // warmup.odin does the work; this worker only serves the track on screen.
 begin_waveform_warmup :: proc() {
 	missing := make([dynamic]Track, 0, 32, context.temp_allocator)
-	for t in lib.tracks { if !t.features.valid { append(&missing, t) } }
+	// Only audio has a waveform; a video's picture is a thumbnail instead.
+	for t in lib.tracks { if t.kind == .Audio && !t.features.valid { append(&missing, t) } }
 	start_warmup(missing[:])
 }
 
@@ -587,6 +588,14 @@ play_track :: proc(track_index: int) {
 
 	t := &lib.tracks[track_index]
 	player.track = track_index
+
+	// A picture, a model or a document has nothing to play: selecting it shows
+	// it in the player's place instead (see draw_media_preview).
+	if t.kind != .Audio {
+		player.playing  = false
+		player.duration = 0
+		return
+	}
 
 	// Asked for before anything that can fail. The waveform is read from a
 	// cache file and has nothing to do with whether playback works, so a track

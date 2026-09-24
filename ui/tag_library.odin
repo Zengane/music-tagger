@@ -30,6 +30,7 @@ Group_Scope :: enum u8 {
 	Both,
 	Music,
 	Effects,
+	Media, // images, video, 3D and documents
 }
 
 Tag_Group :: struct {
@@ -45,11 +46,21 @@ Tag_Group :: struct {
 // Whether a group belongs under the tab that is showing.
 group_in_scope :: proc(g: ^Tag_Group, kind: Kind_Filter) -> bool {
 	switch kind {
-	case .All:     return true
-	case .Music:   return g.scope != .Effects
-	case .Effects: return g.scope != .Music
+	// The media groups are a dozen headings a music library has no use for,
+	// so they only appear once there is something for them to describe.
+	case .All:     return g.scope != .Media || lib.kinds - {.Audio} != {}
+	case .Music:   return g.scope == .Both || g.scope == .Music
+	case .Effects: return g.scope == .Both || g.scope == .Effects
+	case .Images, .Video, .Models, .Documents:
+		return g.scope == .Both || g.scope == .Media
 	}
 	return true
+}
+
+// The scope a file's own tags come from, for the inspector's offerings.
+scope_for_track :: proc(t: ^Track) -> Group_Scope {
+	if t.kind != .Audio { return .Media }
+	return t.is_sfx ? .Effects : .Music
 }
 
 scope_name :: proc(scope: Group_Scope) -> string {
@@ -57,6 +68,7 @@ scope_name :: proc(scope: Group_Scope) -> string {
 	case .Both:    return "music and effects"
 	case .Music:   return "music"
 	case .Effects: return "effects"
+	case .Media:   return "images, video, 3D and documents"
 	}
 	return "both"
 }
@@ -134,6 +146,11 @@ init_tag_library :: proc() {
 	// The original broad set stays as its own category. Files already carry
 	// these tags, and dropping them would orphan every effect tagged so far.
 	add_group("SFX", .SFX, .Effects, SFX_TAGS)
+
+	// Images, video, 3D and documents: what the media analysis can say.
+	for entry in MEDIA_GROUPS {
+		add_group(entry.tag, .Visual, .Media, entry.phrases)
+	}
 
 	add_group("Game",      .Game,     .Both, GAME_TAGS)
 	add_group("Favorites", .Favorite, .Both, FAVORITE_TAGS)
@@ -503,6 +520,7 @@ scope_key :: proc(scope: Group_Scope) -> string {
 	switch scope {
 	case .Music:   return "music"
 	case .Effects: return "effects"
+	case .Media:   return "media"
 	case .Both:    return "both"
 	}
 	return "both"
@@ -513,6 +531,7 @@ scope_from_name :: proc(text: string) -> Group_Scope {
 	switch strings.to_lower(text, context.temp_allocator) {
 	case "music":            return .Music
 	case "effects", "sfx":   return .Effects
+	case "media":            return .Media
 	}
 	return .Both
 }

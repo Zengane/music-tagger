@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .taxonomy import AUDIO_EXTS
+
 AUDIO = "audio"
 IMAGE = "image"
 VIDEO = "video"
@@ -22,7 +24,8 @@ DOCUMENT = "document"
 KINDS = (AUDIO, IMAGE, VIDEO, MODEL, DOCUMENT)
 
 EXTENSIONS: dict[str, tuple[str, ...]] = {
-    AUDIO: (".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac", ".opus", ".aif", ".aiff", ".wma"),
+    # The audio list is the one the tagger was built and trained on.
+    AUDIO: tuple(sorted(AUDIO_EXTS)),
     # Everything Pillow opens, plus the vector and layered formats that are
     # rasterised first (see mtag/media/decode.py for how each is read).
     IMAGE: (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".tga",

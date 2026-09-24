@@ -25,10 +25,12 @@ Chip :: struct {
 	tag: string, // owned; freed when the chip is removed
 }
 
-Kind_Filter :: enum { All, Music, Effects }
+// The first three are always offered; the rest only when the library holds
+// such files, so a music library looks exactly as it did.
+Kind_Filter :: enum { All, Music, Effects, Images, Video, Models, Documents }
 
 Search :: struct {
-	kind:  Kind_Filter, // music, effects, or everything
+	kind:  Kind_Filter, // one kind of file, or everything
 	sort:  Sort_Mode,   // how the results are ordered
 	// The track "more like this" is measured against.
 	anchor: int,
@@ -240,7 +242,8 @@ fuzzy :: proc(needle, haystack: string) -> bool {
 // wrong answers to right ones is worse than one that finds nothing.
 @(private)
 strict_match :: proc(t: ^Track, needle: string) -> bool {
-	return strings.contains(t.haystack, needle) || strings.contains(t.tag_hay, needle)
+	return strings.contains(t.haystack, needle) || strings.contains(t.tag_hay, needle) ||
+	       (len(t.text_hay) > 0 && strings.contains(t.text_hay, needle))
 }
 
 @(private)
@@ -330,6 +333,41 @@ rebuild_view :: proc() {
 		}
 		sort_view()
 	}
+	// Search by description: matches for what files look like, sound like or
+	// say, added after the exact matches so nothing already found moves. The
+	// same kind filter, folder and tag chips apply.
+	if semantic_wanted(query, len(search.view)) {
+		request_semantic(query)
+		if hits := semantic_hits_for(query); len(hits) > 0 {
+			present := make([]bool, len(lib.tracks), context.temp_allocator)
+			for i in search.view { present[i] = true }
+			semantic_loop: for hit in hits {
+				if present[hit.index] { continue }
+				t := &lib.tracks[hit.index]
+				if !kind_allows(t) { continue }
+				if folder_only && !track_in_folder(t) { continue }
+				for c in search.chips {
+					switch c.op {
+					case .Require: if !has_tag_exact(t, c.tag) { continue semantic_loop }
+					case .Exclude: if  has_tag_exact(t, c.tag) { continue semantic_loop }
+					case .Any:
+					}
+				}
+				if or_count > 0 {
+					hit_any := false
+					for c in search.chips {
+						if c.op == .Any && has_tag_exact(t, c.tag) { hit_any = true; break }
+					}
+					if !hit_any { continue semantic_loop }
+				}
+				append(&search.view, hit.index)
+				present[hit.index] = true
+			}
+		}
+	} else {
+		request_semantic("")
+	}
+
 	// The folders that can be stepped into from here. Rebuilt with the view so
 	// it always describes the same moment the list does.
 	rebuild_subfolders()
@@ -339,9 +377,13 @@ rebuild_view :: proc() {
 @(private)
 kind_allows :: proc(t: ^Track) -> bool {
 	switch search.kind {
-	case .Music:   return !t.is_sfx
-	case .Effects: return t.is_sfx
-	case .All:     return true
+	case .Music:     return t.kind == .Audio && !t.is_sfx
+	case .Effects:   return t.kind == .Audio && t.is_sfx
+	case .Images:    return t.kind == .Image
+	case .Video:     return t.kind == .Video
+	case .Models:    return t.kind == .Model
+	case .Documents: return t.kind == .Document
+	case .All:       return true
 	}
 	return true
 }

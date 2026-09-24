@@ -60,6 +60,35 @@ class MeasuredTags(unittest.TestCase):
         self.assertNotIn("Blue-Screen", tags)
         self.assertNotIn("Black-Background", tags)
 
+    def test_foliage_is_not_a_green_screen(self):
+        # Leaves: green everywhere, but light and shadow all through it.
+        from PIL import Image
+
+        rng = np.random.default_rng(3)
+        v = np.clip(rng.random((360, 640)) * 0.7 + 0.2, 0, 1)
+        g = (v * 200).astype(np.uint8)
+        img = np.stack([(g * 0.35).astype(np.uint8), g, (g * 0.25).astype(np.uint8)], -1)
+        p = self.path("leaves.jpg")
+        Image.fromarray(img).save(p, quality=90)
+        tags = tags_of(p, K.IMAGE)
+        self.assertNotIn("Green-Screen", tags)
+        self.assertIn("Green", tags)
+
+    def test_unevenly_lit_green_screen(self):
+        # A real screen is brighter where the lights are: a smooth falloff,
+        # plus sensor noise, must still read as a screen.
+        from PIL import Image
+
+        rng = np.random.default_rng(4)
+        x = np.linspace(0.55, 1.0, 640)[None, :] * np.ones((360, 1))
+        noise = rng.normal(0, 0.02, (360, 640))
+        g = np.clip((x + noise) * 210, 0, 255).astype(np.uint8)
+        img = np.stack([(g * 0.15).astype(np.uint8), g, (g * 0.3).astype(np.uint8)], -1)
+        img[100:330, 280:360] = (190, 150, 130)  # a person
+        p = self.path("lit_green.jpg")
+        Image.fromarray(img).save(p, quality=88)
+        self.assertIn("Green-Screen", tags_of(p, K.IMAGE))
+
     def test_blue_screen_still(self):
         from PIL import Image, ImageDraw
 
@@ -185,7 +214,9 @@ class MeasuredTags(unittest.TestCase):
 
     def test_cuts_and_single_shot(self):
         # Six genuinely different pictures, one after another.
-        sources = ("testsrc2", "mandelbrot", "smptebars", "rgbtestsrc", "life=mold=10:r=25:ratio=0.3", "cellauto=rule=110")
+        # Deterministic sources only: `life` and `cellauto` are seeded at random
+        # on every run, and made this test fail one run in a few.
+        sources = ("testsrc2", "mandelbrot", "smptebars", "rgbtestsrc", "testsrc", "pal75bars")
         parts = []
         for i, src in enumerate(sources):
             q = self.path(f"shot{i}.mp4")

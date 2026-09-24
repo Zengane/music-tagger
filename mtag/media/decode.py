@@ -307,10 +307,13 @@ def load_video(path: Path, n_frames: int = 12) -> Visual:
     # peak is added to what the models see, unless a sampled frame is already
     # close to it.
     if len(tiny) >= 3 and rate > 0:
-        luma = tiny.reshape(len(tiny), -1).mean(axis=1)
+        # The brightest 3x3 patch, as the flash detector reads it: a muzzle
+        # flash is a few percent of the picture and barely moves the mean.
+        patches = np.lib.stride_tricks.sliding_window_view(tiny, (3, 3), axis=(1, 2)).mean(axis=(-1, -2))
+        luma = patches.reshape(len(tiny), -1).max(axis=1)
         peak = int(np.argmax(luma))
         at = peak / rate
-        if luma[peak] - float(np.median(luma)) > 0.08 and all(abs(at - t) > 1.0 / rate for t in kept):
+        if luma[peak] - float(np.median(luma)) > 0.15 and all(abs(at - t) > 1.0 / rate for t in kept):
             f = _ffmpeg_frame(path, at, probe=probe)
             if f is not None:
                 order = int(np.searchsorted(kept, at))

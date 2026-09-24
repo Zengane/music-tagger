@@ -14,9 +14,14 @@ load_track_cues :: proc(t: ^Track, alloc: runtime.Allocator) {
     t.cues.allocator = alloc
     raw, err := os.read_entire_file(sidecar_path(t.path, context.temp_allocator), context.temp_allocator)
     if err != nil { return }
-    data: struct { musicTaggerMarkers: []Cue, musicTaggerKind: string }
+    data: struct { musicTaggerMarkers: []Cue, musicTaggerKind: string, description: string, musicTaggerText: string }
     if json.unmarshal(strip_bom(raw), &data, allocator = context.temp_allocator) != nil { return }
-    if data.musicTaggerKind == "music" || data.musicTaggerKind == "sfx" {
+    // For pictures the description is what they show; searchable like a name.
+    if t.kind != .Audio {
+        if data.description != "" { t.caption = strings.clone(data.description, alloc) }
+        if data.musicTaggerText != "" { t.ocr = strings.clone(data.musicTaggerText, alloc) }
+    }
+    if t.kind == .Audio && (data.musicTaggerKind == "music" || data.musicTaggerKind == "sfx") {
         t.media_kind = strings.clone(data.musicTaggerKind, alloc)
         t.is_sfx = data.musicTaggerKind == "sfx"
     }

@@ -8,16 +8,19 @@ import "core:strings"
 when ODIN_OS == .Windows {
 	EXE_SUFFIX  :: ".exe"
 	SETUP_HINT  :: "Python is not set up. Run setup.bat next to MusicTagger.exe."
+	SHOW_IN_FILE_MANAGER :: "Show in Explorer"
 	// NTFS compares names without regard to case.
 	PATHS_FOLD_CASE :: true
 } else when ODIN_OS == .Darwin {
 	EXE_SUFFIX  :: ""
 	SETUP_HINT  :: "Python is not set up. Run setup.sh next to the app."
+	SHOW_IN_FILE_MANAGER :: "Show in Finder"
 	// APFS and HFS+ are case-insensitive by default.
 	PATHS_FOLD_CASE :: true
 } else {
 	EXE_SUFFIX  :: ""
 	SETUP_HINT  :: "Python is not set up. Run setup.sh next to the app."
+	SHOW_IN_FILE_MANAGER :: "Show in file manager"
 	// ext4, btrfs and xfs are case-sensitive: Song.wav and song.wav are two
 	// different files, and folding them together would lose one.
 	PATHS_FOLD_CASE :: false

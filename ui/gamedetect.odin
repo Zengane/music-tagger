@@ -294,7 +294,7 @@ is_container_folder :: proc(name: string) -> bool {
 	canonical := name
 	for pair in FOLDER_ALIASES { if pair[0] == name { canonical = pair[1] } }
 	switch tag_kind(canonical) {
-	case .Mood, .Sound, .SFX, .Favorite: return true
+	case .Mood, .Sound, .SFX, .Favorite, .Visual: return true
 	case .Game, .Other:
 	}
 	// "DISC 2", "CD 1" and the like describe a part, not a game.

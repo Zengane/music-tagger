@@ -186,7 +186,7 @@ build_folder_rows :: proc() {
 			switch tag_kind(tag) {
 			case .Game:
 				if row.existing == "" { row.existing = tag }
-			case .Mood, .Sound, .SFX:
+			case .Mood, .Sound, .SFX, .Visual:
 				// Counted once per track, not once per tag.
 			case .Favorite, .Other:
 			}

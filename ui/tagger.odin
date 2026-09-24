@@ -37,6 +37,7 @@ Job :: struct {
 	failed:   int,
 	targets:  [dynamic]int, // track indices in this job, in order
 	for_effects: bool,      // which model this batch is going to
+	for_media:   bool,      // images, video, 3D and documents: media_job.py
 	partial:  [dynamic]u8,  // bytes of an incomplete trailing line
 	list_file: string,      // temp file holding the paths, removed on finish
 }
@@ -58,6 +59,10 @@ job_script :: proc() -> string {
 
 sfx_script :: proc() -> string {
 	return join_path({project_root(), "sfx_job.py"})
+}
+
+media_script :: proc() -> string {
+	return join_path({project_root(), "media_job.py"})
 }
 
 model_available :: proc() -> bool {
@@ -86,13 +91,15 @@ start_analyze :: proc(indices: []int) {
 	undo_begin()
 	for i in indices { undo_capture(i) }
 
-	effects := 0
+	// A batch goes to one model. The caller splits mixed selections; see
+	// `analyze_selection` in app.odin.
+	effects, media := 0, 0
 	for i in indices {
-		if lib.tracks[i].is_sfx { effects += 1 }
+		if lib.tracks[i].kind != .Audio { media += 1 }
+		else if lib.tracks[i].is_sfx    { effects += 1 }
 	}
-	// A batch is one or the other. Mixed selections take the majority and the
-	// other half is left for a second pass rather than fed to the wrong model.
-	job.for_effects = effects * 2 > len(indices)
+	job.for_media   = media * 2 > len(indices)
+	job.for_effects = !job.for_media && effects * 2 > len(indices)
 
 	clear(&job.targets)
 	append(&job.targets, ..indices)
@@ -110,7 +117,7 @@ start_analyze :: proc(indices: []int) {
 	}
 	job.list_file = list_path
 
-	script := job.for_effects ? sfx_script() : job_script()
+	script := job.for_media ? media_script() : job.for_effects ? sfx_script() : job_script()
 	logf("analyze: %d files, script %s", len(indices), script)
 	if !os.exists(python_exe()) {
 		logf("analyze: python is missing at %s", python_exe())
@@ -218,6 +225,10 @@ finish_job :: proc() {
 	}
 
 	undo_commit(fmt.tprintf("tagged %d files", job.done))
+
+	// New vectors and captions are on disk; searches should see them.
+	reload_search_server()
+	search.dirty = true
 }
 
 @(private)
@@ -338,7 +349,19 @@ apply_result :: proc(obj: json.Object) {
 		add_tag_to_track(t, game)
 	}
 
-	assign_closest_mood(t)
+	// What a picture shows and what it says, from the media job.
+	if caption := json_str(obj, "caption"); caption != "" && caption != t.caption {
+		t.caption = strings.clone(caption, lib_allocator())
+		t.description_dirty = true
+	}
+	if ocr := json_str(obj, "ocr"); ocr != "" && ocr != t.ocr {
+		t.ocr = strings.clone(ocr, lib_allocator())
+		t.description_dirty = true
+	}
+	if t.description_dirty { rebuild_text_haystack(t, lib_allocator()) }
+	if json_str(obj, "thumb") != "" { forget_thumbnail(index) }
+
+	if t.kind == .Audio { assign_closest_mood(t) }
 	t.scored = true
 	t.dirty  = true
 	invalidate_dirty_count()
@@ -363,12 +386,17 @@ add_tag_to_track :: proc(t: ^Track, tag: string) {
 	if slice.contains(t.tags[:], canon) { return }
 	t.tags.allocator  = lib_allocator()
 	t.kinds.allocator = lib_allocator()
-	append(&t.tags, strings.clone(canon, lib_allocator()))
-	append(&t.kinds, tag_kind(canon))
+	stored := strings.clone(canon, lib_allocator())
+	append(&t.tags, stored)
+	append(&t.kinds, tag_kind(stored))
 	rebuild_tag_haystack(t)
 	t.dirty = true
 	invalidate_dirty_count()
-	lib.counts[canon] = lib.counts[canon] + 1
+	// Keyed by the library's own copy. A map keeps the key it was first given,
+	// and `canon` is often a slice of a JSON line parsed into the frame's
+	// temporary memory: keyed by that, the rail listed names that had been
+	// freed — blanks and "???U" under "not in the tag library".
+	lib.counts[stored] = lib.counts[stored] + 1
 	search.dirty = true
 }
 
@@ -468,7 +496,10 @@ save_track :: proc(index: int) -> (err: string) {
 	if index < 0 || index >= len(lib.tracks) { return "no track" }
 	t := &lib.tracks[index]
 
-	if e := write_track_tags(t.path, t.tags[:], t.cues[:], t.media_kind); e != "" { return e }
+	caption, ocr := "", ""
+	if t.description_dirty { caption, ocr = t.caption, t.ocr }
+	if e := write_track_tags(t.path, t.tags[:], t.cues[:], t.media_kind, caption, ocr); e != "" { return e }
+	t.description_dirty = false
 	t.dirty = false
 	t.cues_dirty = false
 	t.saved = true

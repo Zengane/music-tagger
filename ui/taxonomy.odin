@@ -131,3 +131,27 @@ SFX_INTENT_PHRASES := []Game_Phrases{
 	{"Typing", {"keyboard", "keypress", "typing", "letter", "type_"}},
 	{"Unlock", {"achievement", "complete", "unlocked", "unlock", "reward"}},
 }
+
+IMAGE_EXTS := []string{".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".tga", ".psd", ".heic", ".heif", ".avif", ".jxl", ".exr", ".hdr", ".dds", ".qoi", ".svg", ".ai", ".eps"}
+
+VIDEO_EXTS := []string{".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv", ".mpg", ".mpeg", ".mts", ".m2ts", ".mxf", ".flv", ".3gp", ".ogv", ".prores"}
+
+MODEL_EXTS := []string{".glb", ".gltf", ".obj", ".stl", ".ply", ".off", ".3mf", ".dae", ".fbx", ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc"}
+
+DOCUMENT_EXTS := []string{".pdf", ".docx", ".txt", ".md", ".markdown", ".rtf", ".odt", ".srt", ".vtt", ".fountain"}
+
+MEDIA_GROUPS := []Game_Phrases{
+	{"VFX", {"Muzzle-Flash", "Explosion", "Fire", "Smoke", "Sparks", "Lens-Flare", "Light-Leak", "Film-Burn", "Film-Grain", "Lightning", "Electricity", "Magic-Energy", "Shockwave", "Dust", "Debris", "Blood", "Water-Splash", "Rain", "Snow", "Fog", "Glitch", "Particles", "Bokeh", "Fireworks", "Confetti", "Bullet-Impact", "Laser", "Portal", "Hologram", "HUD", "Transition"}},
+	{"B-Roll", {"Aerial", "Timelapse", "Cityscape", "Street", "Traffic", "Nature", "Landscape", "Mountains", "Forest", "Beach", "Ocean", "Desert", "Sky", "Sunset", "Night", "Office", "Home-Interior", "Kitchen", "Crowd", "People", "Portrait", "Hands", "Technology", "Industry", "Sports", "Concert", "Food", "Animals", "Water", "Architecture"}},
+	{"Shot", {"Close-Up", "Wide-Shot", "Macro", "Top-Down", "Slow-Motion", "Silhouette", "Talking-Head", "Screen-Recording", "Gameplay"}},
+	{"Style", {"Photo", "Illustration", "3D-Render", "Cartoon", "Anime", "Pixel-Art", "Painting", "Sketch", "Flat-Design", "Logo", "Icon", "Texture", "Pattern", "Infographic", "Poster", "Vintage"}},
+	{"Meme", {"Meme", "Reaction", "Screenshot"}},
+	{"Meme-Template", {"Drake-Hotline-Bling", "Distracted-Boyfriend", "Woman-Yelling-At-Cat", "This-Is-Fine", "Surprised-Pikachu", "Expanding-Brain", "Two-Buttons", "Change-My-Mind", "Stonks", "Gigachad", "Wojak", "Pepe", "Doge", "Trollface"}},
+	{"3D", {"Character", "Creature", "Weapon", "Vehicle", "Furniture", "Building", "Prop", "Environment", "Plant", "Rock", "Food", "Jewellery"}},
+	{"Keying", {"Alpha-Channel", "Green-Screen", "Blue-Screen", "Black-Background", "White-Background"}},
+	{"Colour", {"Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink", "Brown", "Black-and-White", "Colourful"}},
+	{"Footage", {"Flash", "Fade-In", "Fade-Out", "Loop", "Single-Shot", "Montage", "Static-Shot", "High-Motion", "Short-Element", "Vertical", "4K", "High-Frame-Rate", "HDR", "Animated"}},
+	{"3D-Facts", {"Rigged", "Textured", "Low-Poly"}},
+	{"Text", {"Has-Text"}},
+	{"Document", {"Script", "Lyrics", "Notes", "Shot-List", "Invoice", "Contract", "Report", "Article", "Recipe", "Resume", "Letter", "Manual", "Subtitles", "Brief"}},
+}

@@ -47,7 +47,8 @@ moves.write_text(
 
 def run(mode):
     p = subprocess.run(
-        [str(ROOT / "venv" / "Scripts" / "python.exe"), str(ROOT / "organize_job.py"),
+        # The interpreter running this test, so it works from any venv layout.
+        [sys.executable, str(ROOT / "organize_job.py"),
          mode, "--library", str(lib), "--moves-from", str(moves)],
         capture_output=True, text=True, encoding="utf-8", cwd=str(ROOT))
     out = []

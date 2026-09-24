@@ -16,6 +16,8 @@ forget_track :: proc(index: int) {
 	// point is about to mean a different file. There is no honest way to
 	// renumber a stack of past states, so it is thrown away instead.
 	undo_clear()
+	clear_thumbnails()
+	restart_search_server()
 
 	if player.track == index { stop_playback() }
 	else if player.track > index { player.track -= 1 }

@@ -31,6 +31,7 @@ SOUND_C   :: rl.Color{ 98, 190, 244, 255}
 SFX_C     :: rl.Color{240, 187,  84, 255}
 GAME_C    :: rl.Color{176, 149, 250, 255}
 OTHER_C   :: rl.Color{157, 166, 181, 255}
+VISUAL_C  :: rl.Color{ 96, 200, 190, 255}
 FAV_C     :: rl.Color{255, 214, 102, 255}
 
 WARN_C    :: rl.Color{248, 180,  76, 255}

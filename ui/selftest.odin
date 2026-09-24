@@ -280,9 +280,23 @@ test_scan :: proc(folder: string) {
 	rebuild_view()
 	check("the effects filter shows exactly the effects", len(search.view) == sfx,
 	      fmt.tprintf("%d shown, %d marked", len(search.view), sfx))
-	check("music and effects together are the whole library",
-	      music_only + sfx == len(lib.tracks),
-	      fmt.tprintf("%d + %d vs %d", music_only, sfx, len(lib.tracks)))
+	// Every file is shown by exactly one of the kind filters.
+	others := 0
+	for k in ([]Kind_Filter{.Images, .Video, .Models, .Documents}) {
+		set_kind_filter(k)
+		rebuild_view()
+		for index in search.view {
+			t := &lib.tracks[index]
+			if t.kind == .Audio {
+				check(fmt.tprintf("the %v filter shows no audio", k), false, t.name)
+				break
+			}
+		}
+		others += len(search.view)
+	}
+	check("every kind together is the whole library",
+	      music_only + sfx + others == len(lib.tracks),
+	      fmt.tprintf("%d music + %d effects + %d other vs %d", music_only, sfx, others, len(lib.tracks)))
 	set_kind_filter(.All)
 	rebuild_view()
 

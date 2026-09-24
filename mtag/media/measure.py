@@ -73,6 +73,23 @@ def _border_mask(h: int, w: int, frac: float = 0.06) -> np.ndarray:
 
 # ── keying, backgrounds, transparency ───────────────────────────────────────
 
+# Above this, a green or blue area is texture (foliage, water), not a screen.
+# Real screens measured by the tests sit near 0.02-0.08, even with a light
+# falloff across them and compression noise; a leafy texture sits well over 0.2.
+KEY_ROUGHNESS = 0.16
+
+
+def _local_roughness(val: np.ndarray, sel: np.ndarray) -> float:
+    """Mean brightness change between neighbouring pixels inside `sel`.
+
+    Standard deviation alone forgives a screen lit brighter on one side, but
+    it also forgives nothing about texture; pixel-to-pixel change is what
+    tells leaves from a painted wall."""
+    dx = np.abs(np.diff(val, axis=1))[sel[:, 1:] & sel[:, :-1]]
+    dy = np.abs(np.diff(val, axis=0))[sel[1:, :] & sel[:-1, :]]
+    both = np.concatenate([dx, dy])
+    return float(both.mean()) * 2.0 if both.size else 0.0
+
 def classify_pixels(rgb: np.ndarray) -> dict[str, np.ndarray]:
     """Boolean masks for the backgrounds an editor keys or blends out."""
     h, s, v = _hsv(rgb)
@@ -98,6 +115,10 @@ def keying(frames: list[np.ndarray], source_alpha: bool, out: Measured,
     if not frames:
         return
     stats = {k: [] for k in ("green", "blue", "black", "white")}
+    # How evenly lit the green and blue areas are. A key screen is lit flat on
+    # purpose; grass, leaves and water are not. Without this a meadow photo
+    # passes for a green screen.
+    evenness = {"green": [], "blue": []}
     border_stats = {k: [] for k in stats}
     transparent, content = [], []
     for f in frames:
@@ -112,6 +133,11 @@ def keying(frames: list[np.ndarray], source_alpha: bool, out: Measured,
         for k, m in masks.items():
             stats[k].append(float((m & opaque).sum()) / n_op)
             border_stats[k].append(float((m & border).sum()) / n_bd)
+        _, _, val = _hsv(rgb)
+        for k in evenness:
+            sel = masks[k] & opaque
+            if sel.sum() >= 64:
+                evenness[k].append(float(val[sel].std()) + _local_roughness(val, sel))
         # Something bright on the background: the element itself.
         content.append(float(((_luma(rgb) > 0.25) & opaque).sum()) / n_op)
 
@@ -125,9 +151,11 @@ def keying(frames: list[np.ndarray], source_alpha: bool, out: Measured,
     if source_alpha and max(transparent) >= 0.02:
         out.add("Alpha-Channel", min(1.0, max(transparent) * 4))
 
-    if bmed["green"] >= 0.5 and med["green"] >= 0.2:
+    rough = {k: (float(np.median(v)) if v else 1.0) for k, v in evenness.items()}
+    out.metrics["key_roughness"] = {k: round(v, 3) for k, v in rough.items()}
+    if bmed["green"] >= 0.5 and med["green"] >= 0.2 and rough["green"] <= KEY_ROUGHNESS:
         out.add("Green-Screen", bmed["green"])
-    if bmed["blue"] >= 0.5 and med["blue"] >= 0.2:
+    if bmed["blue"] >= 0.5 and med["blue"] >= 0.2 and rough["blue"] <= KEY_ROUGHNESS:
         out.add("Blue-Screen", bmed["blue"])
 
     # A flash can fall between every sampled frame; the tiny frames see all.

@@ -57,6 +57,7 @@ category_tone :: proc(kind: Tag_Kind) -> (saturation, lightness: f32) {
 	case .SFX:      return 0.42, 0.60
 	case .Game:     return 0.34, 0.52
 	case .Favorite: return 0.80, 0.62
+	case .Visual:   return 0.46, 0.58
 	case .Other:    return 0.22, 0.50
 	}
 	return 0.40, 0.56
@@ -182,6 +183,7 @@ category_stroke :: proc(kind: Tag_Kind) -> rl.Color {
 	case .SFX:      return rl.Color{160, 240, 220, 170}
 	case .Game:     return rl.Color{ 40,  46,  56, 220}
 	case .Favorite: return rl.Color{255, 226, 130, 220}
+	case .Visual:   return rl.Color{150, 230, 225, 170}
 	case .Other:    return rl.Color{120, 130, 145, 150}
 	}
 	return rl.Color{120, 130, 145, 150}

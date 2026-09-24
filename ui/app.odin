@@ -269,6 +269,8 @@ main :: proc() {
 	defer rl.CloseAudioDevice()
 	start_wave_worker()
 	defer stop_wave_worker()
+	defer stop_thumbnails()
+	defer stop_search_server()
 	defer stop_warmup()
 
 	load_libraries()
@@ -307,6 +309,8 @@ main :: proc() {
 			search.dirty = true
 		}
 		update_audio()
+		begin_thumbnail_frame()
+		poll_search_server()
 		handle_dropped_files()
 		poll_folder_imports()
 
@@ -633,7 +637,7 @@ topbar_rows :: proc(width: f32) -> int {
 @(private)
 topbar_needed_width :: proc() -> f32 {
 	// Left: the panel toggle, the four views, the three kinds, the sort menu.
-	need := px(PAD) + px(32) + px(212 + 10) + px(186 + 8) + px(104 + 14)
+	need := px(PAD) + px(32) + px(212 + 10) + kind_filter_width() + px(8) + px(104 + 14)
 
 	// Right: the two panel icons, and whichever action buttons exist now.
 	need += px(30 + 4 + 28) + px(GAP) + px(PAD)
@@ -684,7 +688,7 @@ draw_topbar :: proc(r: Rect) {
 	x += px(32)
 
 	x += draw_view_switch(rect(x, left.y + (row_h - px(28)) * 0.5, px(212), px(28))) + px(10)
-	x += draw_kind_filter(rect(x, left.y + (row_h - px(28)) * 0.5, px(186), px(28))) + px(8)
+	x += draw_kind_filter(rect(x, left.y + (row_h - px(28)) * 0.5, kind_filter_width(), px(28))) + px(8)
 	x += draw_sort_control(rect(x, left.y + (row_h - px(28)) * 0.5, px(104), px(28))) + px(14)
 
 	// Everything on the right, laid out from the right edge inward. Each one
@@ -798,26 +802,65 @@ draw_view_switch :: proc(r: Rect) -> f32 {
 	return r.width
 }
 
-// Music, effects, or both. Effects use a different vocabulary and a different
-// way of working, so which one you are looking at is a top-level choice rather
-// than something buried in a search query.
+// Which kind of file is showing. Music and effects use different vocabularies
+// and ways of working, so the choice is top level rather than buried in a
+// query. Images, video, 3D and documents get a segment each, but only when the
+// library holds some: a music library looks exactly as it always did.
+KIND_SEGMENT_W :: 62.0
+
+@(private)
+kind_filters_shown :: proc() -> []Kind_Filter {
+	@(static) shown: [len(Kind_Filter)]Kind_Filter
+	n := 0
+	for k in ([]Kind_Filter{.All, .Music, .Effects}) { shown[n] = k; n += 1 }
+	if .Image    in lib.kinds { shown[n] = .Images;    n += 1 }
+	if .Video    in lib.kinds { shown[n] = .Video;     n += 1 }
+	if .Model    in lib.kinds { shown[n] = .Models;    n += 1 }
+	if .Document in lib.kinds { shown[n] = .Documents; n += 1 }
+	// A filter left on after its files went away would hide everything.
+	found := false
+	for k in shown[:n] { if k == search.kind { found = true } }
+	if !found { search.kind = .All; search.dirty = true }
+	return shown[:n]
+}
+
+@(private)
+kind_filter_label :: proc(k: Kind_Filter) -> cstring {
+	switch k {
+	case .All:       return "All"
+	case .Music:     return "Music"
+	case .Effects:   return "Effects"
+	case .Images:    return "Images"
+	case .Video:     return "Video"
+	case .Models:    return "3D"
+	case .Documents: return "Docs"
+	}
+	return ""
+}
+
+@(private)
+kind_filter_width :: proc() -> f32 {
+	return px(KIND_SEGMENT_W) * f32(len(kind_filters_shown()))
+}
+
 @(private)
 draw_kind_filter :: proc(r: Rect) -> f32 {
 	fill_round(r, PANEL_2)
-	third := r.width / 3
+	kinds := kind_filters_shown()
+	cell_w := r.width / f32(len(kinds))
 
-	labels := [3]cstring{"All", "Music", "Effects"}
-	for i in 0 ..< 3 {
-		cell := rect(r.x + third * f32(i), r.y, third, r.height)
-		on := int(search.kind) == i
+	for k, i in kinds {
+		cell := rect(r.x + cell_w * f32(i), r.y, cell_w, r.height)
+		on := search.kind == k
 		if on { fill_round(inset(cell, px(2)), ACCENT_DK, 4) }
 		else if hovered(cell) { ui.hover_cursor = .POINTING_HAND }
 
-		lw := text_w(.Regular, labels[i], FS_SMALL)
-		draw_text_mid(.Regular, labels[i], cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
+		label := kind_filter_label(k)
+		lw := text_w(.Regular, label, FS_SMALL)
+		draw_text_mid(.Regular, label, cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
 		              FS_SMALL, on ? TEXT : TEXT_DIM)
 		if clicked_in(cell) {
-			set_kind_filter(Kind_Filter(i))
+			set_kind_filter(k)
 			clear(&app.selection)
 			invalidate_nodes()
 			invalidate_tagging()
@@ -2434,13 +2477,20 @@ draw_inspector :: proc(r: Rect) {
 	meta := fmt.ctprintf("%s  ·  %s  ·  %.1f MB",
 	                     strings.to_upper(t.ext[1:], context.temp_allocator),
 	                     fmt_time(t.duration), f64(t.size) / (1024 * 1024))
+	if t.kind != .Audio {
+		// No duration is known for a picture, and a 0:00 reads as broken.
+		meta = fmt.ctprintf("%s  ·  %s  ·  %.1f MB", kind_label(t),
+		                    strings.to_upper(t.ext[1:], context.temp_allocator), f64(t.size) / (1024 * 1024))
+	}
 	draw_text(.Regular, meta, x, y, FS_SMALL, TEXT_DIM)
 	y += px(24)
+
+	if t.kind != .Audio { y = draw_inspector_preview(t, app.selected, x, y, w) }
 
 	hline(x, y, w)
 	y += px(14)
 
-	y = draw_marker_controls(t, x, y, w)
+	if t.kind == .Audio { y = draw_marker_controls(t, x, y, w) }
 	// Tags on the file. Clicking one removes it.
 	section_label(x, y, "TAGS ON THIS FILE")
 	y += px(18)
@@ -2465,8 +2515,10 @@ draw_inspector :: proc(r: Rect) {
 	}
 
 	// The game. Kept apart from the palette because there are forty of them and
-	// a track has exactly one, so a wall of buttons is the wrong shape.
-	if !t.is_sfx {
+	// a track has exactly one, so a wall of buttons is the wrong shape. Music
+	// only: the guess reads soundtrack folder names, and says nonsense about a
+	// folder of stock footage.
+	if t.kind == .Audio && !t.is_sfx {
 		section_label(x, y, "GAME")
 		y += px(20)
 
@@ -2576,7 +2628,7 @@ draw_inspector :: proc(r: Rect) {
 		y += px(24)
 		b := rect(x, y, px(150), px(28))
 		busy := job.phase == .Loading || job.phase == .Running
-		if button(b, "Analyze this track", .Normal, !busy && lib.scanned) {
+		if button(b, t.kind == .Audio ? "Analyze this track" : "Analyze this file", .Normal, !busy && lib.scanned) {
 			start_analyze({app.selected})
 		}
 		y += px(36)
@@ -2610,10 +2662,11 @@ draw_tag_palette :: proc(t: ^Track, x, y, w: f32) -> f32 {
 	cy := y
 	cx := x
 
-	// A sound effect gets the effect groups; a track gets the music ones.
-	// Groups that describe both — games, favourites — are applied from the rail
-	// or by search rather than from a wall of buttons here.
-	wanted := t.is_sfx ? Group_Scope.Effects : Group_Scope.Music
+	// A sound effect gets the effect groups, a track the music ones, and a
+	// picture, model or document the media ones. Groups that describe both —
+	// games, favourites — are applied from the rail or by search rather than
+	// from a wall of buttons here.
+	wanted := scope_for_track(t)
 
 	for &g in tag_groups {
 		if g.scope != wanted && g.scope != .Both { continue }
@@ -2678,10 +2731,15 @@ quick_slot :: proc(tag: string) -> int {
 // The bar shows the threshold as a notch, because a raw probability means
 // nothing without knowing what this particular probe considers a yes.
 @(private)
+MEDIA_SCORES_SHOWN :: 24
+
 draw_scores :: proc(t: ^Track, x, y, w: f32) -> f32 {
 	cy := y
 	shown := 0
 	for s in t.scores {
+		// The media vocabulary is over a hundred tags; the best two dozen are
+		// the useful ones, and the rest are one search away.
+		if t.kind != .Audio && shown >= MEDIA_SCORES_SHOWN { break }
 		shown += 1
 
 		row := rect(x, cy, w, px(20))
@@ -2730,7 +2788,7 @@ inspector_content_height :: proc(t: ^Track) -> f32 {
 		if cx + bw > w { h += px(24); cx = 0 }
 		cx += bw + px(4)
 	}
-	wanted := t.is_sfx ? Group_Scope.Effects : Group_Scope.Music
+	wanted := scope_for_track(t)
 	for &g in tag_groups {
 		if g.scope != wanted && g.scope != .Both { continue }
 		cx = 0
@@ -2742,8 +2800,10 @@ inspector_content_height :: proc(t: ^Track) -> f32 {
 		}
 		h += px(28)
 	}
-	h += t.scored ? px(20) * f32(len(t.scores)) : px(120)
+	n_scores := t.kind == .Audio ? len(t.scores) : min(len(t.scores), MEDIA_SCORES_SHOWN)
+	h += t.scored ? px(20) * f32(n_scores) : px(120)
 	if t.is_sfx { h += px(560) }
+	if t.kind != .Audio { h += inspector_preview_height(t, w) }
 	return h + px(120)
 }
 
@@ -3133,27 +3193,34 @@ start_analysis_for_current :: proc() {
 	}
 	if len(candidates) == 0 { return }
 
-	// Music and effects go to different models, so a mixed batch is split and
-	// the larger half runs first rather than sending either to the wrong one.
+	start_analysis_split(candidates)
+}
+
+// Music, effects and everything else go to three different models, so a mixed
+// batch is split and the largest group runs first rather than sending any of
+// it to the wrong one.
+start_analysis_split :: proc(candidates: []int) {
 	music   := make([dynamic]int, 0, len(candidates), context.temp_allocator)
 	effects := make([dynamic]int, 0, len(candidates), context.temp_allocator)
+	media   := make([dynamic]int, 0, len(candidates), context.temp_allocator)
 	for index in candidates {
-		if lib.tracks[index].is_sfx { append(&effects, index) }
-		else                        { append(&music, index) }
+		t := &lib.tracks[index]
+		if t.kind != .Audio  { append(&media, index) }
+		else if t.is_sfx     { append(&effects, index) }
+		else                 { append(&music, index) }
 	}
+	groups := [3]struct{ list: []int, name: string }{
+		{music[:], "tracks"}, {effects[:], "effects"}, {media[:], "images, videos, models and documents"},
+	}
+	largest := 0
+	for g, i in groups { if len(g.list) > len(groups[largest].list) { largest = i } }
+	if len(groups[largest].list) == 0 { return }
+	start_analyze(groups[largest].list)
 
-	if len(effects) > len(music) {
-		start_analyze(effects[:])
-		if len(music) > 0 {
-			toast(fmt.tprintf("tagging %d effects — run again for the %d tracks",
-			                  len(effects), len(music)))
-		}
-	} else if len(music) > 0 {
-		start_analyze(music[:])
-		if len(effects) > 0 {
-			toast(fmt.tprintf("tagging %d tracks — run again for the %d effects",
-			                  len(music), len(effects)))
-		}
+	rest := len(candidates) - len(groups[largest].list)
+	if rest > 0 {
+		toast(fmt.tprintf("analysing %d %s — run again for the other %d files",
+		                  len(groups[largest].list), groups[largest].name, rest))
 	}
 }
 
@@ -3245,7 +3312,7 @@ draw_track_menu :: proc() {
 	append(&items, "Play")
 	append(&items, many ? fmt.ctprintf("Copy %d files", len(app.selection)) : "Copy file")
 	append(&items, "Copy path")
-	append(&items, "Show in Explorer")
+	append(&items, SHOW_IN_FILE_MANAGER)
 	append(&items, "Set game…")
 	if t.is_sfx {
 		append(&items, many ? "Guess categories from filenames" : "Guess category from filename")
@@ -3302,12 +3369,12 @@ draw_track_menu :: proc() {
 			undo_commit(fmt.tprintf("guessed %d effects", changed))
 			toast(fmt.tprintf("guessed categories for %d", changed))
 		} else {
-			music := make([dynamic]int, 0, 8, context.temp_allocator)
+			others := make([dynamic]int, 0, 8, context.temp_allocator)
 			for index in tag_targets() {
-				if !lib.tracks[index].is_sfx { append(&music, index) }
+				if !lib.tracks[index].is_sfx { append(&others, index) }
 			}
-			if len(music) == 0 { toast("effects are tagged by hand") }
-			else               { start_analyze(music[:]) }
+			if len(others) == 0 { toast("effects are tagged by hand") }
+			else                { start_analysis_split(others[:]) }
 		}
 
 	case 6:
