@@ -1,15 +1,16 @@
 # Music Tagger
 
-A desktop app for browsing, tagging and auditioning a large library of music
-and sound effects — built for finding the right cue quickly while editing
-video, rather than for organising files as an end in itself.
+A desktop app for browsing, tagging and finding things in a large library of
+music, sound effects, images, video, 3D models and documents — built for
+finding the right file quickly while editing, rather than for organising files
+as an end in itself.
 
 It tags tracks with a model trained on a real hand-tagged library, lays the
 whole collection out as a map you can navigate by ear, and sends a chosen span
 straight to the Premiere timeline.
 
-Windows only. Written in [Odin](https://odin-lang.org) with raylib; the audio
-analysis is Python.
+Windows, macOS and Linux. Written in [Odin](https://odin-lang.org) with
+raylib; the analysis is Python. Everything runs on your own machine.
 
 **New here?** [docs/overview.md](docs/overview.md) describes what the app does
 and why, without the build instructions.
@@ -30,35 +31,61 @@ and why, without the build instructions.
   at the playhead.
 - **Sound effects** get filename and folder based suggestions, silence-based
   splitting, and their own map.
+- **Images, video, 3D models and documents** are tagged too. What can be
+  measured is measured — green and blue screens, alpha channels, black
+  backgrounds for Screen blends, flashes, loops, cuts, colours, vertical
+  video, frame rate. What cannot is asked of an image model: muzzle flash or
+  explosion, drone shot or close-up, meme or stock photo. Each picture gets a
+  one-line description, and any text in it is read (OCR), so a meme is found
+  by what it says.
+- **Search by description.** Type "explosion on black", "drone shot of a
+  harbour" or "tense string build-up" and it finds files by what they look
+  like, sound like or say, whatever they are called.
 
 Nothing is written to your library until you press Save.
 
 ## Installing
 
-Download the release, unzip it anywhere, run `MusicTagger.exe`. Nothing is
+Download the release for your system, unzip it anywhere, and run
+`MusicTagger.exe` (Windows) or `./MusicTagger` (macOS, Linux). Nothing is
 installed and nothing is written outside the folder — delete it to remove it.
 
-For the AI features, run `setup.bat` once. It needs Python 3.12+ and downloads
-the Python environment and ffmpeg.
+For the AI features, run `setup.bat` (Windows) or `./setup.sh` (macOS, Linux)
+once. It needs Python 3.12 or 3.13, builds the Python environment, and finds or
+explains how to get ffmpeg. On macOS the AI features need Apple Silicon and
+macOS 14 or newer: PyTorch no longer supports Intel Macs.
 
 **Two things worth knowing before you do:**
 
 - The Python environment is about **3.5 GB**, and the models add several GB
-  more in `%USERPROFILE%\.cache\huggingface` — on your **C: drive**, wherever
-  you installed the app. Check you have room.
+  more in your home folder (`.cache/huggingface`) — on Windows that is your
+  **C: drive**, wherever you installed the app. Check you have room.
 - A CUDA GPU makes tagging roughly forty times faster. It works on the CPU;
-  it is just slow.
+  it is just slow. Apple Silicon Macs use their own GPU for the image models.
+- Two model sizes for images, video and documents: `small` (default, usable
+  on a CPU) and `large` (more accurate, wants a GPU). Set
+  `MUSICTAGGER_MODEL_SIZE=large` to use the large one.
 
-If something does not work, run `diagnose.bat` and read `diagnose.txt`. The app
-also writes `logs\musictagger.log` on every run.
+If something does not work, run `diagnose.bat` / `./diagnose.sh` and read
+`diagnose.txt`. The app also writes `logs/musictagger.log` on every run.
 
 ## Building
 
-Needs [Odin](https://odin-lang.org). With the app closed:
+Needs [Odin](https://odin-lang.org). On Windows, with the app closed:
 
 ```bat
 build.bat
 ```
+
+On macOS and Linux:
+
+```sh
+./build.sh
+```
+
+Linux also needs the X11 and OpenGL development headers raylib links against
+(on Ubuntu: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+libgl-dev`).
 
 Or directly:
 
@@ -83,7 +110,12 @@ mtag-test.exe --games / --soundmap / --drops / --benchmark
 venv\Scripts\python.exe tests_filing.py   moving files, on a throwaway copy
 venv\Scripts\python.exe sfx_map_bench.py  how coherent the effects map is
 venv\Scripts\python.exe tests.py          the Python side
+venv\Scripts\python.exe tests_media.py    measured tags on generated media
+venv\Scripts\python.exe tests_media_models.py  the model plumbing, offline
+venv\Scripts\python.exe tests_semantic.py search-by-description ranking
 ```
+
+(On macOS and Linux: `./mtag-test` and `venv/bin/python`.)
 
 ## How good is the tagging, honestly
 

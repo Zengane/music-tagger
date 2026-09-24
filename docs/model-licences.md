@@ -23,6 +23,29 @@ they are not OSI-approved and carry conditions.
 | [MIT/ast-finetuned-audioset-10-10-0.4593](https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593) | BSD-3-Clause | Yes | effects tagging | 2026-09-09 |
 | [xlm-roberta-base](https://huggingface.co/xlm-roberta-base) | MIT | Yes | pulled in by MuQ-MuLan's text tower | not yet verified |
 
+### Images, video, 3D and documents (added 2026-09-24)
+
+| Model | Licence | Sellable | Used for | Checked |
+|---|---|---|---|---|
+| [google/siglip2-base-patch16-256](https://huggingface.co/google/siglip2-base-patch16-256) | Apache-2.0 | Yes | small build: image tags, visual search | 2026-09-24 ¹ |
+| [google/siglip2-so400m-patch16-384](https://huggingface.co/google/siglip2-so400m-patch16-384) | Apache-2.0 | Yes | large build: same | 2026-09-24 ¹ |
+| [florence-community/Florence-2-base](https://huggingface.co/florence-community/Florence-2-base) | MIT | Yes | small build: captions, OCR | 2026-09-24 ¹ |
+| [florence-community/Florence-2-large](https://huggingface.co/florence-community/Florence-2-large) | MIT | Yes | large build: same | 2026-09-24 ¹ |
+| [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) | MIT | Yes | small build: text search, document kinds | 2026-09-24 ¹ |
+| [intfloat/multilingual-e5-base](https://huggingface.co/intfloat/multilingual-e5-base) | MIT | Yes | large build: same | 2026-09-24 ¹ |
+
+¹ Hugging Face could not be reached from the environment this was built in.
+SigLIP 2 and Florence-2 were confirmed through search results quoting the model
+cards; the `florence-community` weights are Microsoft's MIT weights re-uploaded
+for the native transformers class; multilingual-e5-small likewise (search
+result quoting its card). The large-build variants were not checked
+individually. Read all six cards once before a release and replace this
+footnote with the date.
+
+The florence-community copies are used rather than `microsoft/Florence-2-*`
+because they load through transformers' own `Florence2ForConditionalGeneration`
+with no `trust_remote_code`, which is what broke across transformers versions.
+
 **The consequence:** the music tagger as trained cannot be sold. It runs on a
 vector built from all three encoders, two of which are non-commercial. See
 `roadmap.md` §1 — the fix is to retrain on CLAP alone and measure what that
@@ -38,6 +61,14 @@ The effects side is already clean.
 | Adobe `CSInterface.js` | BSD | Shipped inside the Zen Drop panel. |
 | Odin, raylib | BSD-like / zlib | Fine. |
 | torch, transformers, numpy, scikit-learn, umap-learn | BSD / Apache-2.0 / MIT | Fine. |
+| Pillow | MIT-CMU (HPND) | Reads images. Fine. |
+| pypdfium2, PDFium | Apache-2.0 or BSD-3; PDFium BSD-3 | Renders PDF and PDF-compatible .ai pages. Chosen over Ghostscript (AGPL). |
+| python-docx | MIT | Reads .docx. |
+| trimesh | MIT | Loads 3D models. Rendering is our own numpy code, no GL library. |
+| sentencepiece, protobuf | Apache-2.0, BSD-3 | Tokenizers for SigLIP 2 and E5. |
+| resvg-py (optional) | MIT wrapper; resvg MPL-2.0 | SVG. Not installed by default. |
+| pillow-heif | BSD-3 wrapper, but bundles LGPL/GPL codecs | **Not used**, for that reason. |
+| Blender (optional, external) | GPL | Called as a separate program to convert .fbx/.blend/USD, never bundled. |
 
 ## Replacing MuQ
 
@@ -76,10 +107,10 @@ Verify each before use. Licences on the hub do change between versions.
 
 | Candidate | For | Expected |
 |---|---|---|
-| SigLIP 2 | images, video, 3D renders | Apache-2.0 |
-| OpenCLIP | same, alternative | MIT |
+| SigLIP 2 | images, video, 3D renders | Apache-2.0 — now in use, see above |
+| OpenCLIP | same, alternative | MIT (code); weights vary |
 | DINOv2 | image similarity without text | Apache-2.0, but check the specific weights |
-| BGE / E5 | text embedding | MIT |
+| BGE / E5 | text embedding | MIT — E5 now in use, see above |
 | Qwen 2.5 | local summarising | Apache-2.0 |
-| trimesh, pyrender | 3D loading and offscreen rendering | MIT |
+| trimesh | 3D loading | MIT — now in use; pyrender not needed |
 | Blender headless | `.blend`, `.fbx` | GPL — call it, never bundle it |

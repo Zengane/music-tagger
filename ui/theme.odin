@@ -237,7 +237,12 @@ build_fonts :: proc(extra: []rune) {
 
 		a.logical  = size
 		a.baked_px = max(i32(px(size) + 0.5), 8)
-		a.emoji = bake(font_path(.Emoji), a.baked_px, emoji_points[:])
+		// macOS and Linux ship colour emoji as bitmap fonts raylib cannot read.
+		// The regular face still has the plain stars (★ ☆), which is better
+		// than every favourite drawing as "?".
+		emoji_font := font_path(.Emoji)
+		if emoji_font == "" { emoji_font = font_path(.Regular) }
+		a.emoji = bake(emoji_font, a.baked_px, emoji_points[:])
 		a.regular  = bake(font_path(.Regular), a.baked_px, points[:])
 		a.bold     = bake(font_path(.Bold),    a.baked_px, points[:])
 

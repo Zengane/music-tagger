@@ -59,3 +59,42 @@ Owner's goals for the overhaul:
 
 ---
 
+
+---
+
+## 5. Session 2026-09-24 (cloud, Linux): what was done
+
+Branch `claude/kind-allen-v29vjx`. Full list and open items: `docs/audit.md`.
+
+- **macOS and Linux.** Windows-only Odin files renamed `*_windows.odin`, with
+  `*_posix.odin` partners (`platform_posix.odin`, `subprocess_posix.odin`).
+  Type-checks for all four targets; builds and runs on Linux (tested under
+  Xvfb). `build.sh`, `setup.sh`, `diagnose.sh`. **Not yet:** drag-out on
+  macOS/Linux (copies to the clipboard instead), a signed `.app`.
+- **Media analysis:** `media_job.py`, `mtag/media/`. Measured tags + SigLIP 2
+  + Florence-2 + multilingual E5, all commercial licences. 3D rendered with a
+  numpy point renderer (no GL). Small/large builds via
+  `MUSICTAGGER_MODEL_SIZE`. Thresholds in `mtag/media/vocab.py` are **guesses**
+  until measured on real files; `media_vocab.json` overrides them.
+- **Search by description:** `search_server.py` (resident, stdin/stdout) +
+  `ui/semantic.odin`. Two or more plain words, or a query that finds nothing,
+  also goes to the server.
+- **UI:** file kinds, Images/Video/3D/Docs filters (only when present),
+  thumbnails (`ui/thumbs.odin`, key = `hash_key`, same as the waveform cache),
+  captions/OCR in inspector and player area, saved to the sidecar.
+- **Bug fixed:** tag counts keyed by freed JSON strings (garbage names in the
+  rail after Analyze) — affected Windows music tagging too.
+
+### What the owner does next
+
+1. Pull the branch on the PC, run `build.bat`, then
+   `venv\Scripts\python.exe -m pip install -r requirements.txt` (new packages).
+2. Run the tests: `tests_media.py`, `tests_media_models.py`,
+   `tests_semantic.py`, and `mtag-test.exe --selftest`.
+3. Point the app at a folder of memes, VFX elements and B-roll, press
+   Analyze, and look at what it says. The first run downloads about 1.5 GB of
+   models. Report the tags that are wrong; that is how the thresholds get set.
+4. Decide the open questions in `docs/audit.md` §6 (delete the old web UI?)
+   and §2 (which side of the three stale tests is right).
+
+Nothing was tested with a GPU, on Windows, or on a Mac in this session.

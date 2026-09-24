@@ -128,7 +128,11 @@ in about a millisecond a frame.
 
 ## Honest limits
 
-- **Windows only**, today.
+- **Windows, macOS and Linux**, but dragging a file out of the window into
+  another app works on Windows only so far; elsewhere it is copy and paste.
+- **The image and video tags are new and not yet measured.** The music
+  tagger's thresholds were set by measuring precision on a real library; the
+  media tags' thresholds are starting points until the same is done for them.
 - **The install is large.** The Python environment is about 3.5 GB, and the
   models add several GB more.
 - **A GPU makes tagging roughly forty times faster.** It works without one. It
@@ -149,6 +153,7 @@ in about a millisecond a frame.
   is worth knowing about the approach
 - `docs/roadmap.md` — where this is going: images, video, 3D, and other
   platforms
+- `docs/audit.md` — what was checked, fixed and left open on 2026-09-24
 - `docs/model-licences.md` — every model, its licence, and whether it can be
   used commercially
 - `HANDOVER.md` — the full technical history, for anyone working on the code
