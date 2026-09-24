@@ -31,7 +31,7 @@ PREMIERE_DEFAULT_PORT :: 47821
 // exe and now this all read the one file.
 @(private)
 zendrop_settings_path :: proc(allocator := context.temp_allocator) -> string {
-	appdata := os.get_env("APPDATA", context.temp_allocator)
+	appdata := user_config_dir()
 	if appdata == "" { return "" }
 	return join_path({appdata, "Zengane", "Zen Drop", "settings.json"}, allocator)
 }

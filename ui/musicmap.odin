@@ -78,7 +78,7 @@ load_music_map :: proc() {
 		y, y_ok := as_number(pair[1])
 		if !x_ok || !y_ok { continue }
 
-		key := strings.to_lower(path, context.allocator)
+		key := strings.clone(path_key(path), context.allocator)
 		music_map.points[key] = {f32(x), f32(y)}
 	}
 	music_map.found = len(music_map.points) > 0
@@ -102,7 +102,7 @@ invalidate_music_map :: proc() {
 // Where this track sits, if the model has an opinion about it.
 music_map_position :: proc(t: ^Track) -> (rl.Vector2, bool) {
 	if !music_map.found { return {}, false }
-	key := strings.to_lower(t.path, context.temp_allocator)
+	key := path_key(t.path)
 	p, ok := music_map.points[key]
 	return p, ok
 }

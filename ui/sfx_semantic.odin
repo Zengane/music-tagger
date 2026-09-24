@@ -32,7 +32,7 @@ load_sfx_sound_map :: proc() {
         regions: []struct { label: string, pos: [2]f32, count: int, spread: f32 },
     }
     if json.unmarshal(raw,&doc,allocator=context.temp_allocator)!=nil { return }
-    for path,xy in doc.points { sfx_sound_map.points[strings.to_lower(path,context.allocator)]={xy[0],xy[1]} }
+    for path,xy in doc.points { sfx_sound_map.points[strings.clone(path_key(path),context.allocator)]={xy[0],xy[1]} }
 
     clear(&sfx_regions)
     for r in doc.regions {
@@ -64,7 +64,7 @@ build_sfx_sound_layout :: proc() -> bool {
     scale:=max(f32(WORLD_R),math.sqrt(f32(len(lib.tracks)))*24)
     for &t,i in lib.tracks {
         if !t.is_sfx || !kind_allows(&t) { continue }
-        p,ok:=sfx_sound_map.points[strings.to_lower(t.path,context.temp_allocator)]
+        p,ok:=sfx_sound_map.points[path_key(t.path)]
         if !ok { continue }
         append(&nodes.dots,Node_Dot{track=i,pos={p.x*scale,p.y*scale},col=sound_colour(&t),kind=.SFX})
     }

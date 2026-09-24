@@ -18,10 +18,11 @@ import "core:strings"
 import win32 "core:sys/windows"
 
 Stream :: struct {
-	process:   win32.HANDLE,
-	read_pipe: win32.HANDLE,
-	running:   bool,
-	exit_code: u32,
+	process:    win32.HANDLE,
+	read_pipe:  win32.HANDLE,
+	write_pipe: win32.HANDLE, // the child's stdin, when started `with_stdin`
+	running:    bool,
+	exit_code:  u32,
 }
 
 @(private)
@@ -62,7 +63,7 @@ build_command_line :: proc(args: []string, allocator := context.temp_allocator) 
 // Starts `args[0]` with stdout on a pipe and no console window.
 // stderr is discarded: these tools are chatty and the app reports failure by
 // the exit code and by having no usable output.
-stream_start :: proc(args: []string, working_dir := "") -> (s: Stream, ok: bool) {
+stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> (s: Stream, ok: bool) {
 	sa := win32.SECURITY_ATTRIBUTES{
 		nLength        = size_of(win32.SECURITY_ATTRIBUTES),
 		bInheritHandle = true,
@@ -89,13 +90,24 @@ stream_start :: proc(args: []string, working_dir := "") -> (s: Stream, ok: bool)
 	// With STARTF_USESTDHANDLES every handle must be real. A NULL stdin is not
 	// "no input" — it is an invalid handle, and a child that reads or even
 	// probes stdin can hang on it. NUL is the correct empty input.
-	null_in := win32.CreateFileW(
-		win32.utf8_to_wstring("NUL", context.temp_allocator),
-		win32.GENERIC_READ,
-		win32.FILE_SHARE_READ | win32.FILE_SHARE_WRITE,
-		&sa, win32.OPEN_EXISTING, 0, nil,
-	)
-	defer if null_in != win32.INVALID_HANDLE_VALUE { win32.CloseHandle(null_in) }
+	// A caller that wants to talk to the child gets a pipe instead.
+	null_in, stdin_write: win32.HANDLE
+	if with_stdin {
+		if !win32.CreatePipe(&null_in, &stdin_write, &sa, 0) {
+			win32.CloseHandle(read_pipe)
+			win32.CloseHandle(write_pipe)
+			return {}, false
+		}
+		win32.SetHandleInformation(stdin_write, win32.HANDLE_FLAG_INHERIT, 0)
+	} else {
+		null_in = win32.CreateFileW(
+			win32.utf8_to_wstring("NUL", context.temp_allocator),
+			win32.GENERIC_READ,
+			win32.FILE_SHARE_READ | win32.FILE_SHARE_WRITE,
+			&sa, win32.OPEN_EXISTING, 0, nil,
+		)
+	}
+	defer if null_in != win32.INVALID_HANDLE_VALUE && null_in != nil { win32.CloseHandle(null_in) }
 
 	startup := win32.STARTUPINFOW{
 		cb         = size_of(win32.STARTUPINFOW),
@@ -116,10 +128,11 @@ stream_start :: proc(args: []string, working_dir := "") -> (s: Stream, ok: bool)
 
 	if !spawned {
 		win32.CloseHandle(read_pipe)
+		if stdin_write != nil { win32.CloseHandle(stdin_write) }
 		return {}, false
 	}
 	win32.CloseHandle(info.hThread)
-	return Stream{process = info.hProcess, read_pipe = read_pipe, running = true}, true
+	return Stream{process = info.hProcess, read_pipe = read_pipe, write_pipe = stdin_write, running = true}, true
 }
 
 // Reads whatever is already in the pipe, up to `len(buf)`. Never blocks:
@@ -173,8 +186,26 @@ stream_finished :: proc(s: ^Stream) -> bool {
 	return true
 }
 
+// Writes to the child's stdin. Only for streams started `with_stdin`.
+stream_write :: proc(s: ^Stream, data: []byte) -> bool {
+	if !s.running || s.write_pipe == nil { return false }
+	sent := 0
+	for sent < len(data) {
+		wrote: win32.DWORD
+		if !win32.WriteFile(s.write_pipe, raw_data(data[sent:]), u32(len(data) - sent), &wrote, nil) { return false }
+		sent += int(wrote)
+	}
+	return true
+}
+
+// Closes the child's stdin, which tells a reader loop to finish.
+stream_close_stdin :: proc(s: ^Stream) {
+	if s.write_pipe != nil { win32.CloseHandle(s.write_pipe); s.write_pipe = nil }
+}
+
 stream_close :: proc(s: ^Stream) {
 	if !s.running { return }
+	stream_close_stdin(s)
 	if s.read_pipe != nil { win32.CloseHandle(s.read_pipe) }
 	if s.process   != nil { win32.CloseHandle(s.process) }
 	s.running = false

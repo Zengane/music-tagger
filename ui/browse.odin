@@ -65,13 +65,13 @@ track_in_folder :: proc(t: ^Track) -> bool {
 	if browse.folder == "" { return browse.recursive || parent_folder(t.rel) == "" }
 
 	dir := parent_folder(t.rel)
-	if strings.equal_fold(dir, browse.folder) { return true }
+	if path_equal(dir, browse.folder) { return true }
 	if !browse.recursive { return false }
 
 	// Underneath it, at any depth. The separator check stops a sibling that
 	// merely starts with the same letters from matching.
 	if len(dir) <= len(browse.folder) { return false }
-	if !strings.equal_fold(dir[:len(browse.folder)], browse.folder) { return false }
+	if !path_equal(dir[:len(browse.folder)], browse.folder) { return false }
 	return dir[len(browse.folder)] == '\\' || dir[len(browse.folder)] == '/'
 }
 

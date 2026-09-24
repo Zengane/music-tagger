@@ -159,17 +159,7 @@ font_covers :: proc(font: rl.Font, samples: []rune) -> bool {
 	return true
 }
 
-// The Japanese faces Windows ships, best first. Yu Gothic is the modern UI
-// font; MS Gothic is the old one and is present on every install. Both are
-// collections, which is the whole reason this file exists.
-CJK_CANDIDATES := []string{
-	"C:/Windows/Fonts/YuGothR.ttc",
-	"C:/Windows/Fonts/YuGothM.ttc",
-	"C:/Windows/Fonts/msgothic.ttc",
-	"C:/Windows/Fonts/meiryo.ttc",
-	"C:/Windows/Fonts/malgun.ttf",
-	"C:/Windows/Fonts/NanumGothic-Regular.ttf",
-}
+// The Japanese faces to try, best first, are per platform: fonts_platform.odin.
 
 // Loads the first Japanese face that both loads and covers the sample text.
 load_cjk_font :: proc(size_px: i32, points: []rune, samples: []rune) -> (rl.Font, bool) {

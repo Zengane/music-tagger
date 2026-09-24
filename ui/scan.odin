@@ -57,7 +57,7 @@ start_scan :: proc(root: string, recursive := true, include_sfx := false, additi
 		additive = additive,
 		library_root = strings.clone(additive ? lib.root : root),
 	}
-	if !additive && strings.equal_fold(root, lib.root) {
+	if !additive && path_equal(root, lib.root) {
 		scan.request.folders = make([]string, len(imported_folders))
 		for p, i in imported_folders { scan.request.folders[i] = strings.clone(p) }
 	} else if !additive {
@@ -86,14 +86,14 @@ poll_scan :: proc() -> (finished: bool) {
 	defer delete(scan.request.folders)
 	defer { for p in scan.request.folders { delete(p) } }
 	if scan.err == "" {
-		same := strings.equal_fold(lib.root, scan.result.root) || scan.request.additive
+		same := path_equal(lib.root, scan.result.root) || scan.request.additive
 		if same { merge_scan_result() } else {
 			clear_imported_folders()
 			for p in scan.request.folders { append(&imported_folders, strings.clone(p)) }
 		}
 		if scan.request.additive {
 			known := false
-			for p in imported_folders { if strings.equal_fold(p, scan.request.root) { known = true } }
+			for p in imported_folders { if path_equal(p, scan.request.root) { known = true } }
 			if !known && !path_under_root(lib.root, scan.request.root) { append(&imported_folders, strings.clone(scan.request.root)) }
 		}
 		undo_clear()
@@ -333,11 +333,25 @@ count_tags :: proc() {
 	}
 }
 
+// The folder the program lives in. Asked of the OS rather than read from
+// argv[0], which is a bare name when the program was found on PATH and a
+// relative path when it was started from a shell.
+//
+// A macOS app bundle keeps its binary in Contents/MacOS; the scripts, model and
+// venv sit beside the bundle's contents in Contents/Resources when packaged,
+// and beside the binary in a plain build. Whichever holds the jobs wins.
 project_root :: proc() -> string {
 	@(static) cached: string
 	if cached != "" { return cached }
-	exe := os.args[0]
-	cached = strings.clone(filepath.dir(exe))
+	dir, err := os.get_executable_directory(context.allocator)
+	if err != nil || dir == "" { dir = strings.clone(filepath.dir(os.args[0])) }
+	when ODIN_OS == .Darwin {
+		resources := join_path({filepath.dir(dir), "Resources"})
+		if !os.exists(join_path({dir, "tag_job.py"})) && os.exists(join_path({resources, "tag_job.py"})) {
+			dir = strings.clone(resources)
+		}
+	}
+	cached = dir
 	return cached
 }
 
@@ -349,10 +363,10 @@ merge_scan_result :: proc() {
     alloc := virtual.arena_allocator(&out.arena)
     old := make(map[string]int, context.temp_allocator)
     seen := make(map[string]bool, context.temp_allocator)
-    for t, i in lib.tracks { old[strings.to_lower(t.path, context.temp_allocator)] = i }
+    for t, i in lib.tracks { old[path_key(t.path)] = i }
     unique := make([dynamic]Track, 0, len(out.tracks) + len(lib.tracks))
     for fresh in out.tracks {
-        key := strings.to_lower(fresh.path, context.temp_allocator)
+        key := path_key(fresh.path)
         if seen[key] { continue }
         seen[key] = true
         t := fresh
@@ -370,7 +384,7 @@ merge_scan_result :: proc() {
         append(&unique, t)
     }
     for t in lib.tracks {
-        key := strings.to_lower(t.path, context.temp_allocator)
+        key := path_key(t.path)
         if !seen[key] && (scan.request.additive || t.dirty) { append(&unique, clone_track(t, alloc)) }
     }
     delete(out.tracks)

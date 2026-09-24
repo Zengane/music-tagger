@@ -45,7 +45,7 @@ load_library_snapshot :: proc(root: string) -> bool {
 	if err != nil { return false }
 	s: Library_Snapshot
 	if json.unmarshal(raw, &s, allocator = context.temp_allocator) != nil { return false }
-	if s.version != 1 || !strings.equal_fold(s.root, root) || s.recursive != app.recursive { return false }
+	if s.version != 1 || !path_equal(s.root, root) || s.recursive != app.recursive { return false }
 	if virtual.arena_init_growing(&lib.arena) != nil { return false }
 	alloc := lib_allocator()
 	lib.root = strings.clone(root, alloc)
@@ -109,14 +109,14 @@ poll_folder_imports :: proc() {
 }
 
 path_under_root :: proc(root, path: string) -> bool {
-    if strings.equal_fold(root, path) { return true }
+    if path_equal(root, path) { return true }
     prefix := strings.trim_right(root, "\\/")
-    return len(path) > len(prefix) && strings.equal_fold(path[:len(prefix)], prefix) &&
+    return len(path) > len(prefix) && path_equal(path[:len(prefix)], prefix) &&
            (path[len(prefix)] == '\\' || path[len(prefix)] == '/')
 }
 
 import_prefix :: proc(root, path: string) -> string {
-    if strings.equal_fold(root, path) { return "" }
+    if path_equal(root, path) { return "" }
     if path_under_root(root, path) {
         rel, err := filepath.rel(root, path, context.temp_allocator)
         if err == nil { return rel }
@@ -128,7 +128,7 @@ snapshot_folders :: proc(root: string) -> []string {
     raw, err := os.read_entire_file(snapshot_path(root), context.temp_allocator)
     if err != nil { return nil }
     s: Library_Snapshot
-    if json.unmarshal(raw, &s, allocator = context.temp_allocator) != nil || s.version != 1 || !strings.equal_fold(root, s.root) { return nil }
+    if json.unmarshal(raw, &s, allocator = context.temp_allocator) != nil || s.version != 1 || !path_equal(root, s.root) { return nil }
     out := make([]string, len(s.folders))
     for p, i in s.folders { out[i] = strings.clone(p) }
     return out

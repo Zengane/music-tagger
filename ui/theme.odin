@@ -183,8 +183,7 @@ draw_text_mid :: proc(w: Weight, s: cstring, x, y, h, size: f32, col: rl.Color) 
 
 // ── baking ──────────────────────────────────────────────────────────────────
 
-FONT_REGULAR_PATH :: "C:/Windows/Fonts/segoeui.ttf"
-FONT_BOLD_PATH    :: "C:/Windows/Fonts/segoeuib.ttf"
+// Which files these are is per platform; see fonts_platform.odin.
 // The Japanese faces are tried in order by `load_cjk_font`; see fontfile.odin
 // for why they need unpacking first.
 
@@ -237,9 +236,9 @@ build_fonts :: proc(extra: []rune) {
 
 		a.logical  = size
 		a.baked_px = max(i32(px(size) + 0.5), 8)
-		a.emoji = bake("C:/Windows/Fonts/seguiemj.ttf", a.baked_px, emoji_points[:])
-		a.regular  = bake(FONT_REGULAR_PATH, a.baked_px, points[:])
-		a.bold     = bake(FONT_BOLD_PATH,    a.baked_px, points[:])
+		a.emoji = bake(font_path(.Emoji), a.baked_px, emoji_points[:])
+		a.regular  = bake(font_path(.Regular), a.baked_px, points[:])
+		a.bold     = bake(font_path(.Bold),    a.baked_px, points[:])
 
 		if wide_points != nil && (size == FS_BODY || size == FS_SMALL) {
 			// A handful of the library's own wide characters, used to check
@@ -253,8 +252,16 @@ build_fonts :: proc(extra: []rune) {
 }
 
 @(private)
-bake :: proc(path: cstring, size_px: i32, points: []rune) -> rl.Font {
-	f := rl.LoadFontEx(path, size_px, raw_data(points), i32(len(points)))
+bake :: proc(path: string, size_px: i32, points: []rune) -> rl.Font {
+	if path == "" { return {} }
+	f: rl.Font
+	// Collections need unpacking first; see fontfile.odin. Linux and macOS
+	// ship their UI faces as collections more often than Windows does.
+	if lower := strings.to_lower(path, context.temp_allocator); strings.has_suffix(lower, ".ttc") {
+		f, _ = load_font_file(path, size_px, points)
+	} else {
+		f = rl.LoadFontEx(strings.clone_to_cstring(path, context.temp_allocator), size_px, raw_data(points), i32(len(points)))
+	}
 	if f.texture.id != 0 {
 		// Baked at the size it is drawn, so there is no minification to smooth
 		// over. Bilinear would only soften it; point sampling keeps the stems

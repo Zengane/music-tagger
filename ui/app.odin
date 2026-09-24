@@ -226,8 +226,13 @@ main :: proc() {
 
 	// Undecorated, because the caption bar is drawn by this program — see
 	// titlebar.odin, which also puts the resizing frame back.
-	rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_HIGHDPI,
-	                   .WINDOW_UNDECORATED})
+	// Elsewhere the desktop draws the caption; see platform_posix.odin.
+	when ODIN_OS == .Windows {
+		rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_HIGHDPI,
+		                   .WINDOW_UNDECORATED})
+	} else {
+		rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_HIGHDPI})
+	}
 	rl.InitWindow(1440, 900, "Music Tagger")
 	defer rl.CloseWindow()
 	rl.SetWindowMinSize(1040, 640)
@@ -1118,7 +1123,7 @@ draw_rail :: proc(r: Rect) {
 	}
 	for entry, i in libraries {
 		row := rect(inner.x + px(4), y, inner.width - px(8), px(24))
-		active := strings.equal_fold(lib.root, entry.path)
+		active := path_equal(lib.root, entry.path)
 		missing := !os.is_dir(entry.path)
 
 		if active { fill_round(row, ACCENT_DK, 4) }
@@ -3281,7 +3286,7 @@ draw_track_menu :: proc() {
 		}
 
 	case 3:
-		reveal_in_explorer(t.path)
+		reveal_in_file_manager(t.path)
 
 	case 4:
 		open_tag_editor(.Set_Game, "", "Game")
@@ -3391,19 +3396,6 @@ delete_chosen_tracks :: proc() -> (deleted: int, failed: int) {
 	invalidate_tagging()
 	invalidate_nodes()
 	return
-}
-
-// Opens Explorer with the file selected. `/select,` needs the path as one
-// argument, quoted, which the command-line builder already handles.
-@(private)
-reveal_in_explorer :: proc(path: string) {
-	s, ok := stream_start({"explorer.exe", fmt.tprintf("/select,%s", path)})
-	if !ok {
-		toast("could not open Explorer")
-		return
-	}
-	// Explorer returns immediately and leaves the window to its own process.
-	stream_close(&s)
 }
 
 // Which half of the library a new category describes. Music and effects want

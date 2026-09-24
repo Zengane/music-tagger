@@ -1926,53 +1926,60 @@ run_waveform_warmup :: proc(folder: string) -> int {
 test_drag_payload :: proc() {
 	fmt.println("\ndrag payload")
 
-	check("OLE is available", ensure_ole_initialised())
+	when ODIN_OS == .Windows {
+		check("OLE is available", ensure_ole_initialised())
 
-	paths := []string{
-		"C:\\music\\one.mp3",
-		"H:\\Media Browser\\Mega Music Pack\\Pokémon Channel OST？ Binder.mp3",
+		paths := []string{
+			"C:\\music\\one.mp3",
+			"H:\\Media Browser\\Mega Music Pack\\Pokémon Channel OST？ Binder.mp3",
+		}
+		handle, bytes, ok := build_hdrop(paths)
+		check("the block was built", ok)
+		if !ok { return }
+		defer win32.GlobalFree(handle)
+
+		block := win32.GlobalLock(handle)
+		check("the block can be locked", block != nil)
+		if block == nil { return }
+		defer win32.GlobalUnlock(handle)
+
+		header := (^DROPFILES)(block)
+		check("the names start after the header", header.pFiles == size_of(DROPFILES),
+		      fmt.tprintf("offset %d, header is %d", header.pFiles, size_of(DROPFILES)))
+		check("the names are marked wide", bool(header.fWide))
+
+		// Walk the list back out the way a drop target would.
+		cursor := ([^]u16)(uintptr(block) + uintptr(header.pFiles))
+		recovered := make([dynamic]string, 0, 4, context.temp_allocator)
+		at := 0
+		for {
+			if cursor[at] == 0 { break } // the extra null that closes the list
+			start := at
+			for cursor[at] != 0 { at += 1 }
+			text, err := win32.utf16_to_utf8(cursor[start:at], context.temp_allocator)
+			if err == nil { append(&recovered, text) }
+			at += 1
+		}
+
+		check("both paths came back", len(recovered) == 2, fmt.tprintf("%d", len(recovered)))
+		if len(recovered) == 2 {
+			check("the first path is intact", recovered[0] == paths[0], recovered[0])
+			// The one with characters outside the code page is the whole reason
+			// this is UTF-16 rather than the ANSI form of the structure.
+			check("a non-ASCII path survives", recovered[1] == paths[1], recovered[1])
+		}
+
+		// The block must be exactly as long as the header plus the names, or a
+		// target reading to the end walks off it.
+		expected := size_of(DROPFILES) + (at + 1) * size_of(u16)
+		check("the block is the size it claims", bytes == expected,
+		      fmt.tprintf("%d bytes, expected %d", bytes, expected))
+	} else {
+		// No drag source here yet; what the clipboard fallback carries is a
+		// URI list, and the encoding is the part that can be wrong.
+		check("spaces are encoded", file_uri("/music/a b.mp3") == "file:///music/a%20b.mp3", file_uri("/music/a b.mp3"))
+		check("non-ASCII is encoded", file_uri("/m/é") == "file:///m/%C3%A9", file_uri("/m/é"))
 	}
-	handle, bytes, ok := build_hdrop(paths)
-	check("the block was built", ok)
-	if !ok { return }
-	defer win32.GlobalFree(handle)
-
-	block := win32.GlobalLock(handle)
-	check("the block can be locked", block != nil)
-	if block == nil { return }
-	defer win32.GlobalUnlock(handle)
-
-	header := (^DROPFILES)(block)
-	check("the names start after the header", header.pFiles == size_of(DROPFILES),
-	      fmt.tprintf("offset %d, header is %d", header.pFiles, size_of(DROPFILES)))
-	check("the names are marked wide", bool(header.fWide))
-
-	// Walk the list back out the way a drop target would.
-	cursor := ([^]u16)(uintptr(block) + uintptr(header.pFiles))
-	recovered := make([dynamic]string, 0, 4, context.temp_allocator)
-	at := 0
-	for {
-		if cursor[at] == 0 { break } // the extra null that closes the list
-		start := at
-		for cursor[at] != 0 { at += 1 }
-		text, err := win32.utf16_to_utf8(cursor[start:at], context.temp_allocator)
-		if err == nil { append(&recovered, text) }
-		at += 1
-	}
-
-	check("both paths came back", len(recovered) == 2, fmt.tprintf("%d", len(recovered)))
-	if len(recovered) == 2 {
-		check("the first path is intact", recovered[0] == paths[0], recovered[0])
-		// The one with characters outside the code page is the whole reason
-		// this is UTF-16 rather than the ANSI form of the structure.
-		check("a non-ASCII path survives", recovered[1] == paths[1], recovered[1])
-	}
-
-	// The block must be exactly as long as the header plus the names, or a
-	// target reading to the end walks off it.
-	expected := size_of(DROPFILES) + (at + 1) * size_of(u16)
-	check("the block is the size it claims", bytes == expected,
-	      fmt.tprintf("%d bytes, expected %d", bytes, expected))
 }
 
 // ── fonts ───────────────────────────────────────────────────────────────────

@@ -116,7 +116,7 @@ save_libraries :: proc() {
 
 find_library :: proc(path: string) -> int {
 	for entry, i in libraries {
-		if strings.equal_fold(entry.path, path) { return i }
+		if path_equal(entry.path, path) { return i }
 	}
 	return -1
 }
@@ -154,7 +154,7 @@ set_library_path :: proc(index: int, path: string) -> string {
 	if trimmed == "" { return "give it a folder" }
 	if !os.is_dir(trimmed) { return "that folder does not exist" }
 
-	was_open := strings.equal_fold(libraries[index].path, lib.root)
+	was_open := path_equal(libraries[index].path, lib.root)
 	delete(libraries[index].path)
 	libraries[index].path = strings.clone(trimmed)
 	save_libraries()
@@ -204,7 +204,7 @@ open_last_library :: proc() {
 // again — the second should select the track, not import its folder.
 path_in_library :: proc(path: string) -> int {
 	for &t, i in lib.tracks {
-		if strings.equal_fold(t.path, path) { return i }
+		if path_equal(t.path, path) { return i }
 	}
 	return -1
 }

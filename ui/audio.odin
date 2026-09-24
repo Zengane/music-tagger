@@ -32,9 +32,10 @@ import rl "vendor:raylib"
 // it the analysis produces one failure per file and no tags at all.
 @(private)
 tool_path :: proc(name: string) -> string {
-	local := join_path({project_root(), "bin", fmt.tprintf("%s.exe", name)})
+	file := fmt.tprintf("%s%s", name, EXE_SUFFIX)
+	local := join_path({project_root(), "bin", file})
 	if os.exists(local) { return local }
-	beside := join_path({project_root(), fmt.tprintf("%s.exe", name)})
+	beside := join_path({project_root(), file})
 	if os.exists(beside) { return beside }
 	return name
 }

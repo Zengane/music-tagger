@@ -43,8 +43,13 @@ Job :: struct {
 
 job: Job
 
+// The venv's interpreter. Windows puts it in Scripts\, everything else in bin/.
 python_exe :: proc() -> string {
-	return join_path({project_root(), "venv", "Scripts", "python.exe"})
+	when ODIN_OS == .Windows {
+		return join_path({project_root(), "venv", "Scripts", "python.exe"})
+	} else {
+		return join_path({project_root(), "venv", "bin", "python"})
+	}
 }
 
 job_script :: proc() -> string {
@@ -111,7 +116,7 @@ start_analyze :: proc(indices: []int) {
 		logf("analyze: python is missing at %s", python_exe())
 		job.phase = .Failed
 		set_owned(&job.err, "Python is not set up — run setup.bat, then try again")
-		toast("Python is not set up. Run setup.bat next to MusicTagger.exe.")
+		toast(SETUP_HINT)
 		return
 	}
 	stream, ok := stream_start({
