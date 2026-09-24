@@ -61,10 +61,13 @@ def rekey_caches(src: Path, dst: Path, size: int, mtime: float) -> int:
     for enc_dir in CACHE_ROOT.iterdir():
         if not enc_dir.is_dir():
             continue
-        old_p, new_p = enc_dir / f"{old}.npy", enc_dir / f"{new}.npy"
-        if old_p.exists() and not new_p.exists():
-            old_p.rename(new_p)
-            moved += 1
+        # Embeddings are .npy; media analysis also keeps its results (.json)
+        # and thumbnails (.png) under the same key.
+        for ext in (".npy", ".json", ".png"):
+            old_p, new_p = enc_dir / f"{old}{ext}", enc_dir / f"{new}{ext}"
+            if old_p.exists() and not new_p.exists():
+                old_p.rename(new_p)
+                moved += 1
     return moved
 
 
