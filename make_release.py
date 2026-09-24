@@ -1,8 +1,9 @@
-r"""Assemble a shareable copy of Music Tagger.
+r"""Assemble a shareable copy of Music Tagger for the platform it runs on.
 
-    venv\Scripts\python.exe make_release.py
+    venv\Scripts\python.exe make_release.py      (Windows)
+    venv/bin/python make_release.py               (macOS, Linux)
 
-Produces `dist\MusicTagger\` and a zip beside it. The app reads everything
+Produces `dist/MusicTagger/` and a zip beside it, named for the platform. The app reads everything
 relative to its own .exe, so the release is a folder you unzip anywhere — there
 is nothing to register and nothing to uninstall.
 
@@ -26,17 +27,25 @@ machine instead, and the app works without it for everything except the AI.
 from __future__ import annotations
 
 import json
+import os
+import platform
 import shutil
+import stat
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "dist" / "MusicTagger"
+WINDOWS = os.name == "nt"
+EXE = "MusicTagger.exe" if WINDOWS else "MusicTagger"
+PLATFORM = {"nt": "windows"}.get(os.name, "macos" if sys.platform == "darwin" else "linux")
 
 # Everything the app or its jobs import at run time.
 FILES = [
-    "MusicTagger.exe",
+    EXE,
+    "media_job.py",
+    "search_server.py",
     "tag_job.py",
     "sfx_job.py",
     "map_job.py",
@@ -68,9 +77,9 @@ def base_tag_library(src: Path) -> dict:
 
 
 def main() -> int:
-    exe = ROOT / "MusicTagger.exe"
+    exe = ROOT / EXE
     if not exe.exists():
-        print("Build MusicTagger.exe first (build.bat).")
+        print(f"Build {EXE} first ({'build.bat' if WINDOWS else './build.sh'}).")
         return 1
 
     if OUT.exists():
@@ -109,21 +118,31 @@ def main() -> int:
     else:
         missing.append("tag_library.json")
 
-    (OUT / "setup.bat").write_text(SETUP_BAT, encoding="utf-8")
-    (OUT / "diagnose.bat").write_text(DIAGNOSE_BAT, encoding="utf-8")
-    (OUT / "README.txt").write_text(README, encoding="utf-8")
+    if WINDOWS:
+        (OUT / "setup.bat").write_text(SETUP_BAT, encoding="utf-8")
+        (OUT / "diagnose.bat").write_text(DIAGNOSE_BAT, encoding="utf-8")
+        (OUT / "README.txt").write_text(README, encoding="utf-8")
+    else:
+        for script in ("setup.sh", "diagnose.sh"):
+            shutil.copy2(ROOT / script, OUT / script)
+            (OUT / script).chmod(0o755)
+        (OUT / EXE).chmod(0o755)
+        (OUT / "README.txt").write_text(README_POSIX, encoding="utf-8")
 
     if missing:
         print("missing, not packaged:")
         for m in missing:
             print("   ", m)
 
-    zip_path = ROOT / "dist" / "MusicTagger.zip"
+    zip_path = ROOT / "dist" / f"MusicTagger-{PLATFORM}-{platform.machine().lower()}.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(OUT.rglob("*")):
             if p.is_file():
+                # ZipFile.write keeps the mode bits on macOS and Linux, which
+                # is what makes the program and the .sh files runnable after
+                # unzipping. Stated here so nobody "simplifies" it to writestr.
                 z.write(p, p.relative_to(OUT.parent))
 
     total = sum(p.stat().st_size for p in OUT.rglob("*") if p.is_file())
@@ -146,7 +165,7 @@ def main() -> int:
 
     panel = OUT / "premiere" / "ZenDrop" / "CSXS" / "manifest.xml"
     installer = OUT / "premiere" / "install-premiere-extension.bat"
-    if not panel.exists() or not installer.exists():
+    if not panel.exists() or (WINDOWS and not installer.exists()):
         print("ERROR: the Premiere panel did not make it into the package")
         return 1
     print("the Premiere panel and its installer are in the package")
@@ -391,6 +410,55 @@ The app also keeps logs\musictagger.log, which records every run: the command
 it launched, everything the job printed, and the code it exited with.
 
 Your tags are written into TagSpaces sidecars (a .ts folder beside the audio),
+so they travel with the files and other tools can read them.
+
+Nothing is written to your library until you press Save.
+"""
+
+
+README_POSIX = r"""Music Tagger
+============
+
+Unzip anywhere and run ./MusicTagger. Nothing is installed and nothing is
+written outside this folder, except the models, which Hugging Face keeps in
+~/.cache/huggingface. To remove the app, delete the folder.
+
+macOS: the app is not signed yet, so the first time, right-click it and choose
+Open, or run:  xattr -dr com.apple.quarantine /path/to/this/folder
+
+First run
+---------
+
+1.  Start ./MusicTagger.
+2.  Press + in the sidebar and point it at a folder of audio, images, video,
+    3D models or documents.
+
+That is enough to browse, play and tag by hand.
+
+For the AI features
+-------------------
+
+Tagging, search by description, the maps, filing and imports run Python. Run
+./setup.sh once. It needs Python 3.12 or 3.13 and downloads a few GB.
+
+ffmpeg is required: every audio and video file is decoded through it.
+setup.sh checks for it and says how to install it (brew install ffmpeg on
+macOS; your package manager on Linux). Or put the ffmpeg and ffprobe programs
+in a folder called "bin" next to MusicTagger.
+
+On macOS the AI features need Apple Silicon (M1 or later) and macOS 14 or
+newer; PyTorch no longer supports Intel Macs.
+
+Dragging files out of the window into another app is not available on macOS
+and Linux yet. Use Copy (Ctrl+C / Cmd+C) and paste instead.
+
+If something does not work
+--------------------------
+
+Run ./diagnose.sh. It writes diagnose.txt saying what is installed, what is
+missing, and what the jobs said last time. Send that file.
+
+Your tags are written into TagSpaces sidecars (a .ts folder beside each file),
 so they travel with the files and other tools can read them.
 
 Nothing is written to your library until you press Save.

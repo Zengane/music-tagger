@@ -4,10 +4,17 @@
 # resolver happily swapped the CUDA torch for a CPU wheel off PyPI. Everything
 # still ran, just ~40x slower, on the CPU. Pinning the +cu130 local version
 # means pip refuses to substitute a CPU build instead of doing it silently.
+#
+# macOS has no CUDA: it gets the plain PyPI build, which uses the Apple GPU
+# (MPS). PyTorch 2.13 ships macOS wheels for Apple Silicon on macOS 14 or later
+# only; Intel Macs are not supported by PyTorch any more.
 --extra-index-url https://download.pytorch.org/whl/cu130
-torch==2.13.0+cu130
-torchvision==0.28.0+cu130
-torchaudio==2.11.0+cu130
+torch==2.13.0+cu130; sys_platform != "darwin"
+torchvision==0.28.0+cu130; sys_platform != "darwin"
+torchaudio==2.11.0+cu130; sys_platform != "darwin"
+torch==2.13.0; sys_platform == "darwin"
+torchvision==0.28.0; sys_platform == "darwin"
+torchaudio==2.11.0; sys_platform == "darwin"
 
 # The model chain is pinned, not floated.
 #
@@ -42,5 +49,21 @@ llvmlite==0.48.0
 librosa==0.11.0
 soundfile==0.14.0
 
+# The older browser-based UI (app.py, desktop.py, run-webview.bat). The native
+# app does not use these; see docs/audit.md.
 flask>=3.0
 pywebview>=5.4
+
+# Images, video, 3D models and documents (media_job.py). Licences in
+# docs/model-licences.md; all allow commercial use.
+pillow==12.3.0          # MIT-CMU
+pypdfium2==5.13.0       # Apache-2.0 / BSD-3; PDFium itself is BSD-3
+python-docx==1.2.0      # MIT
+trimesh==5.1.0          # MIT
+sentencepiece==0.2.2    # Apache-2.0; tokenizers for SigLIP 2 and E5
+protobuf==7.36.2        # BSD-3
+# Optional, not installed by default:
+#   resvg-py     SVG thumbnails and tags (MIT wrapper, resvg is MPL-2.0)
+#   pycollada    .dae models
+# Deliberately absent: pillow-heif bundles LGPL/GPL codecs (libheif, x265).
+# HEIC files are still read through ffmpeg when its build supports them.

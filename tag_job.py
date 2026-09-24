@@ -6,7 +6,8 @@ encoder cannot be holding VRAM or stalling the window between jobs.
 
 Usage:
 
-    venv\Scripts\python.exe tag_job.py --paths-from <file>
+    venv\Scripts\python.exe tag_job.py --paths-from <file>     (Windows)
+    venv/bin/python tag_job.py --paths-from <file>             (macOS, Linux)
 
 `--paths-from` names a UTF-8 file with one audio path per line, which avoids
 the Windows command-line length limit on a batch of several hundred tracks.
@@ -91,9 +92,9 @@ def main() -> int:
     ok_ffmpeg, where = have_ffmpeg()
     if not ok_ffmpeg:
         emit(event="error", message=(
-            "ffmpeg was not found, so no audio can be read. Put ffmpeg.exe and "
-            "ffprobe.exe in a 'bin' folder next to MusicTagger.exe, or on your "
-            "PATH, then try again."))
+            "ffmpeg was not found, so no audio can be read. Put ffmpeg and "
+            "ffprobe in a 'bin' folder next to the app, or on your PATH, then "
+            "try again."))
         return 2
 
     # Recorded on every run, because a version mismatch in this chain is
