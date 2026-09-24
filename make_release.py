@@ -281,6 +281,16 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
+rem The image, caption and text models download on first use otherwise, which
+rem makes the first Analyze look stuck for several minutes.
+echo.
+choice /c YN /m "Download the models for images, video, 3D and documents now (about 1.5 GB)"
+if errorlevel 2 (
+    echo Skipped. They download the first time you analyse a picture.
+) else (
+    venv\Scripts\python.exe media_job.py --probe
+)
+
 echo.
 echo Done. Start MusicTagger.exe.
 pause

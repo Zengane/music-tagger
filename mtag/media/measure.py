@@ -384,7 +384,12 @@ def measure(visual, kind: str) -> Measured:
     colours(visual.frames, out, skip_background=keyed or visual.source_alpha)
     if kind == "video":
         video_format(visual.probe, out)
-        temporal(visual.tiny, visual.tiny_rate, out)
+        if visual.extra.get("skimmed"):
+            # Read from keyframes only (see decode.tiny_frames): too sparse
+            # for flashes, fades, cuts or motion, so none are claimed.
+            out.metrics["skimmed"] = True
+        else:
+            temporal(visual.tiny, visual.tiny_rate, out)
         loop(visual.extra.get("first"), visual.extra.get("last"), out)
         if out.metrics.get("duration", 0) and out.metrics["duration"] <= 6:
             out.add("Short-Element", 1.0)

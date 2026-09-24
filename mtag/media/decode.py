@@ -28,6 +28,8 @@ from .. import kinds as K
 # Frames are analysed at this long edge. Large enough for OCR on a meme and for
 # SigLIP at 384, small enough that sixteen of them are a few MB.
 FRAME_EDGE = 768
+# Seconds. Longer videos are skimmed by keyframe; see tiny_frames.
+LONG_VIDEO = 120
 
 
 @dataclass
@@ -267,15 +269,29 @@ def tiny_frames(path: Path, probe: Probe, rate: float = 0.0, max_points: int = 2
         rate = min(probe.fps or 24.0, 60.0)
     rate = min(rate, max_points / max(probe.duration, 1e-3))
     rate = max(rate, 0.05)
-    cmd = [A.FFMPEG, "-v", "error", "-nostdin"] + _decoder_args(path, probe) + [
-        "-i", str(path), "-an", "-vf", f"fps={rate:.5f},scale=32:18,format=gray",
-        "-f", "rawvideo", "-"]
+    # A long video is read from its keyframes only. Decoding every frame of an
+    # hour of 4K to keep one in a hundred took minutes; keyframes are a few a
+    # second at most, which is plenty for cuts and motion at that length. The
+    # frame-exact reading that finds a two-frame flash is kept for clips up to
+    # LONG_VIDEO seconds, which is where effects elements live.
+    if probe.duration > LONG_VIDEO:
+        cmd = [A.FFMPEG, "-v", "error", "-nostdin", "-skip_frame", "nokey"] + _decoder_args(path, probe) + [
+            "-i", str(path), "-an", "-fps_mode", "vfr", "-vf", "scale=32:18,format=gray",
+            "-f", "rawvideo", "-"]
+    else:
+        cmd = [A.FFMPEG, "-v", "error", "-nostdin"] + _decoder_args(path, probe) + [
+            "-i", str(path), "-an", "-vf", f"fps={rate:.5f},scale=32:18,format=gray",
+            "-f", "rawvideo", "-"]
     out = _run(cmd)
     if out.returncode != 0:
         return np.zeros((0, 18, 32), dtype=np.float32), rate
     raw = np.frombuffer(out.stdout, dtype=np.uint8)
     n = raw.size // (32 * 18)
-    return raw[: n * 32 * 18].reshape(n, 18, 32).astype(np.float32) / 255.0, rate
+    frames = raw[: n * 32 * 18].reshape(n, 18, 32).astype(np.float32) / 255.0
+    if probe.duration > LONG_VIDEO:
+        # Keyframes come at the encoder's whim, so this is an average rate.
+        rate = n / probe.duration if probe.duration else 0.0
+    return frames, rate
 
 
 def load_video(path: Path, n_frames: int = 12) -> Visual:
@@ -322,6 +338,7 @@ def load_video(path: Path, n_frames: int = 12) -> Visual:
 
     v = Visual(frames=frames, times=kept, probe=probe, tiny=tiny,
                tiny_rate=rate, source_alpha=probe.has_alpha)
+    v.extra["skimmed"] = d > LONG_VIDEO
     # The true first and last frames, for the loop test. The sampled frames
     # stop short of both ends on purpose, so they cannot answer it.
     if 0 < d <= 120:

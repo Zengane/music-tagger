@@ -110,5 +110,14 @@ if ! venv/bin/python -m pip install -r requirements.txt; then
     exit 1
 fi
 
+# The image, caption and text models download on first use otherwise, which
+# makes the first Analyze look stuck for several minutes. Offered here instead.
+echo
+read -r -p "Download the models for images, video, 3D and documents now (about 1.5 GB)? [Y/n] " answer
+case "$answer" in
+    [nN]*) echo "Skipped. They download the first time you analyse a picture." ;;
+    *) venv/bin/python media_job.py --probe || echo "The download did not finish; it will be retried on first use." ;;
+esac
+
 echo
 echo "Done. Start the app: ./MusicTagger"
