@@ -44,6 +44,37 @@ and why, without the build instructions.
 
 Nothing is written to your library until you press Save.
 
+## Finding your way around
+
+- **Left, the sidebar:** your libraries (+ adds a folder), then **Show**: all
+  files, or one kind — music, sound effects, video, images, 3D models,
+  documents — then the **folder tree**, then the tags.
+- **Middle, the files:** one view from a list to big tiles. Drag the zoom
+  slider in the top bar, hold Ctrl and turn the mouse wheel, or press V.
+  In the list, click a column heading to sort; click again to reverse.
+  Under All files, folders show like in a file manager (the folder button
+  in the top bar lists everything underneath instead).
+- **Right, the preview panel:** the file itself — picture, playing video,
+  a 3D model you can turn, PDF pages or a document's text — then its facts,
+  tags (type in the box to add one) and what the models said.
+  Double-click a file, or press the corner button, to see it full-window;
+  the arrow keys then step through the files.
+- **Bottom, the player:** for music, effects and the sound of a video.
+- **Top bar:** where you are, search, sort, zoom, views, Analyze, Save.
+  Right-click it to choose which buttons it shows.
+- **Settings** (gear): interface size, library, the models (which are
+  installed, how big, where), storage, and the build you are running.
+
+Keys: Space play/pause · ↑↓ next/previous · V list or tiles · B browse ·
+Backspace up a folder · Tab preview panel · Ctrl F search · Ctrl S save ·
+F1 all shortcuts · F12 screenshot into `logs/`.
+
+3D formats: glTF/GLB, OBJ, STL, PLY, OFF, 3MF, DAE, Blockbench (.bbmodel)
+and MagicaVoxel (.vox) open directly. FBX, .blend, USD, Alembic, 3DS and X3D
+need Blender installed. Cinema 4D, 3ds Max, Maya, SketchUp and LightWave
+files are listed and tagged by name; export them as FBX, OBJ or glTF to see
+them.
+
 ## Installing
 
 Download the release for your system, unzip it anywhere, and run

@@ -291,6 +291,7 @@ main :: proc() {
 	// Straight into the library that was open last, rather than an empty
 	// window and an import every time.
 	open_last_library()
+	restore_folder(lib.root != "" ? lib.root : field_string(&app.folder))
 	defer save_library_snapshot()
 	defer cancel_analyze()
 	defer stop_split()

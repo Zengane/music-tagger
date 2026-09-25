@@ -6,6 +6,7 @@ package musictagger
 // `libraries.json`. Small enough to write by hand and read with the same
 // forgiving scanner the recent-folder list uses.
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -37,6 +38,9 @@ Prefs :: struct {
 	// file manager, or every file underneath in one flat list.
 	show_folders: bool,
 	toolbar:      Toolbar_Set, // which optional controls the top bar carries
+	// Where you were: the folder, and the library it is in. Owned.
+	last_folder:      string,
+	last_folder_root: string,
 }
 
 // Which models the jobs use. Auto lets the job look at the hardware.
@@ -122,6 +126,8 @@ load_prefs :: proc() {
 	}
 	prefs.sort_desc    = json_bool_field(text, "sort_desc",    prefs.sort_desc)
 	prefs.show_folders = json_bool_field(text, "show_folders", prefs.show_folders)
+	prefs.last_folder      = json_string_field(text, "last_folder")
+	prefs.last_folder_root = json_string_field(text, "last_folder_root")
 	if v, ok := json_number_field(text, "toolbar"); ok && v >= 0 {
 		prefs.toolbar = transmute(Toolbar_Set)u32(v)
 	}
@@ -136,7 +142,12 @@ remember_sort :: proc() {
 	save_prefs()
 }
 
+// Set by the self test, which moves through folders and sorts as a user
+// would: none of that may end up in the real prefs.json.
+prefs_frozen: bool
+
 save_prefs :: proc() {
+	if prefs_frozen { return }
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "{{\n")
 	fmt.sbprintf(&b, "  \"scale\": %.3f,\n", prefs.scale)
@@ -161,6 +172,8 @@ save_prefs :: proc() {
 	fmt.sbprintf(&b, "  \"sort\": %d,\n", int(prefs.sort))
 	fmt.sbprintf(&b, "  \"sort_desc\": %s,\n", prefs.sort_desc ? "true" : "false")
 	fmt.sbprintf(&b, "  \"show_folders\": %s,\n", prefs.show_folders ? "true" : "false")
+	fmt.sbprintf(&b, "  \"last_folder\": %s,\n", json_quote(prefs.last_folder))
+	fmt.sbprintf(&b, "  \"last_folder_root\": %s,\n", json_quote(prefs.last_folder_root))
 	fmt.sbprintf(&b, "  \"toolbar\": %d\n", transmute(u32)prefs.toolbar)
 	fmt.sbprintf(&b, "}}\n")
 	_ = os.write_entire_file(prefs_path(), transmute([]byte)strings.to_string(b))
@@ -213,4 +226,31 @@ json_bool_field :: proc(text, key: string, fallback: bool) -> bool {
 	value, found := json_field_value(text, key)
 	if !found { return fallback }
 	return value == "true"
+}
+
+// A string as JSON, quoted and escaped (Windows paths are full of backslashes).
+json_quote :: proc(s: string) -> string {
+	data, err := json.marshal(s, allocator = context.temp_allocator)
+	if err != nil { return "\"\"" }
+	return string(data)
+}
+
+// A string field, heap-owned, or "" when absent.
+json_string_field :: proc(text, key: string) -> string {
+	needle := fmt.tprintf("\"%s\":", key)
+	at := strings.index(text, needle)
+	if at < 0 { return "" }
+	rest := strings.trim_left_space(text[at + len(needle):])
+	if len(rest) == 0 || rest[0] != '"' { return "" }
+	// The end of the string: the next quote that is not escaped.
+	end := 1
+	for end < len(rest) {
+		if rest[end] == '\\' { end += 2; continue }
+		if rest[end] == '"' { break }
+		end += 1
+	}
+	if end >= len(rest) { return "" }
+	out: string
+	if json.unmarshal(transmute([]byte)rest[:end + 1], &out) != nil { return "" }
+	return out
 }

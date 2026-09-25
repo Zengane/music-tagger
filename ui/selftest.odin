@@ -37,6 +37,7 @@ run_selftest :: proc(folder: string, with_model := false) -> int {
 	// The checks below ask about the whole library at once, which is the flat
 	// view. The browsing checks turn folders on and off themselves.
 	prefs.show_folders = false
+	prefs_frozen = true
 
 	test_sfx_semantic_layout()
 	test_second_pass()

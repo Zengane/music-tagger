@@ -236,6 +236,8 @@ before building.
 
 1. Not seen on this machine (no sound device here): video with sound, and
    the video bar's scrubbing in the big viewer. Check on the PC.
-2. README: new layout, keys (B, V, Backspace, F12, right-click the top bar),
-   settings page.
-3. Small: remember the last open folder; `tile_size` pref is unused.
+2. Small: the `tile_size` pref is unused (zoom replaced it).
+
+Done since: README "Finding your way around"; the app reopens the folder you
+were in (prefs `last_folder`, kept across rescans of the same library); the
+self test no longer writes prefs.json (`prefs_frozen`).

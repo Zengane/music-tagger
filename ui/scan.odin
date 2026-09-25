@@ -130,7 +130,10 @@ poll_scan :: proc() -> (finished: bool) {
 		count_tags()
 		for &t in lib.tracks { assign_closest_mood(&t) }
 		invalidate_dirty_count()
-		set_browse_folder("")
+		// A rescan of the same library keeps your place (a folder that went
+		// away is noticed when the view is built); another library starts at
+		// its top.
+		if !path_equal(prefs.last_folder_root, lib.root) { set_browse_folder("") }
 		// Every waveform gets built in the background from here, so opening a
 		// track later is a file read instead of a wait.
 		begin_waveform_warmup()

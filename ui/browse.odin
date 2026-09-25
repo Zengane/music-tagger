@@ -140,6 +140,7 @@ set_browse_folder :: proc(rel: string) {
 	search.dirty = true
 	app.browser_scroll.offset = 0
 	if len(folder_tree.nodes) > 0 { reveal_folder(browse.folder) }
+	remember_folder()
 }
 
 // Up one level, or to the top if already one deep.
@@ -239,4 +240,28 @@ breadcrumb_path :: proc(count: int, allocator := context.temp_allocator) -> stri
 		strings.write_string(&b, parts[i])
 	}
 	return strings.to_string(b)
+}
+
+// Remembered between runs, for the library it belongs to.
+@(private)
+remember_folder :: proc() {
+	if lib.root == "" { return }
+	if prefs.last_folder == browse.folder && path_equal(prefs.last_folder_root, lib.root) { return }
+	delete(prefs.last_folder)
+	delete(prefs.last_folder_root)
+	prefs.last_folder      = strings.clone(browse.folder)
+	prefs.last_folder_root = strings.clone(lib.root)
+	save_prefs()
+}
+
+// Back in the folder you were in last time, when this is the same library.
+// A folder that has gone is noticed when the view is built, which goes back
+// to the top.
+restore_folder :: proc(root: string) {
+	if prefs.last_folder != "" && path_equal(prefs.last_folder_root, root) {
+		old := browse.folder
+		browse.folder = strings.clone(prefs.last_folder)
+		if old != "" { delete(old) }
+		search.dirty = true
+	}
 }
