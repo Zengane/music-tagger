@@ -69,6 +69,7 @@ logf :: proc(format: string, args: ..any) {
 // the window.
 log_environment :: proc() {
 	logf("---- Music Tagger starting ----")
+	logf("build        %s", build_label())
 	logf("app folder   %s", project_root())
 
 	py := python_exe()

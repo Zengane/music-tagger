@@ -447,7 +447,10 @@ shape_tags :: proc(f: Features, out: ^[dynamic]string) {
 
 Sort_Mode :: enum {
 	Name,
+	Type,
 	Duration,
+	Size,
+	Modified,
 	Brightness,
 	Punch,
 	Loudness,
@@ -458,14 +461,34 @@ Sort_Mode :: enum {
 sort_mode_name :: proc(mode: Sort_Mode) -> cstring {
 	switch mode {
 	case .Name:       return "Name"
+	case .Type:       return "Type"
 	case .Duration:   return "Length"
-	case .Brightness: return "Bright"
-	case .Punch:      return "Punchy"
-	case .Loudness:   return "Loud"
-	case .Build:      return "Building"
-	case .Similar:    return "Similar"
+	case .Size:       return "Size"
+	case .Modified:   return "Date modified"
+	case .Brightness: return "Brightness"
+	case .Punch:      return "Punch"
+	case .Loudness:   return "Loudness"
+	case .Build:      return "Build-up"
+	case .Similar:    return "Similarity"
 	}
 	return "Name"
+}
+
+// Which way a sort goes the first time it is picked: the way a file manager
+// does it. Newest and biggest first; names, types and lengths A to Z.
+sort_default_descending :: proc(mode: Sort_Mode) -> bool {
+	#partial switch mode {
+	case .Size, .Modified: return true
+	}
+	return false
+}
+
+// The sound measurements only mean something for audio.
+sort_is_audio_only :: proc(mode: Sort_Mode) -> bool {
+	#partial switch mode {
+	case .Brightness, .Punch, .Loudness, .Build, .Similar: return true
+	}
+	return false
 }
 
 // How far apart two sounds are, for "more like this one".

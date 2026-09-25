@@ -58,6 +58,7 @@ Thumbs :: struct {
 	cache:   [dynamic]Thumb_Texture,
 	clock:   u64,
 	loads:   int, // this frame
+	renders: int, // models and pages drawn into thumbnails this frame
 }
 
 @(private)
@@ -110,8 +111,16 @@ thumbnail :: proc(index: int) -> (rl.Texture2D, bool) {
 			return tex, true
 		}
 		if state == .Ready { t.thumb_state = u8(Thumb_State.Unknown) }
-		if ffmpeg_can_thumb(t) { queue_thumbnail(index) }
-		else { t.thumb_state = u8(Thumb_State.Failed) }
+		if ffmpeg_can_thumb(t) {
+			queue_thumbnail(index)
+		} else {
+			// Models and PDFs are drawn here, from what the previews make.
+			switch render_local_thumbnail(index, path) {
+			case .Done:    // on disk now; loaded next frame
+			case .Waiting: // the mesh or the pages are still being made
+			case .Failed:  t.thumb_state = u8(Thumb_State.Failed)
+			}
+		}
 	}
 	return {}, false
 }
@@ -131,6 +140,7 @@ remember_texture :: proc(index: int, tex: rl.Texture2D) {
 // Called once per frame by the main loop.
 begin_thumbnail_frame :: proc() {
 	thumbs.loads = 0
+	thumbs.renders = 0
 	sync.mutex_lock(&thumbs.mutex)
 	done := make([]Thumb_Done, len(thumbs.done), context.temp_allocator)
 	copy(done, thumbs.done[:])
@@ -265,36 +275,6 @@ kind_label :: proc(t: ^Track) -> string {
 	return ""
 }
 
-// What stands in the player's place when a picture is selected: the picture,
-// and beside it what the analysis said it shows and says.
-draw_media_preview :: proc(r: Rect, index: int) {
-	t := &lib.tracks[index]
-	pic := rect(r.x + px(8), r.y + px(6), min(r.height * 1.78, r.width * 0.45), r.height - px(12))
-	if tex, ok := thumbnail(index); ok {
-		draw_texture_fit(tex, pic)
-	} else {
-		label := strings.clone_to_cstring(kind_label(t), context.temp_allocator)
-		lw := text_w(.Bold, label, FS_BODY)
-		draw_text_mid(.Bold, label, pic.x + (pic.width - lw) * 0.5, pic.y, pic.height, FS_BODY, TEXT_FAINT)
-	}
-	x := pic.x + pic.width + px(14)
-	w := r.x + r.width - x - px(10)
-	if w < px(60) { return }
-	y := r.y + px(10)
-	if t.caption != "" {
-		y = draw_wrapped_block(t.caption, x, y, w, r.y + r.height - px(8), FS_BODY, TEXT)
-		y += px(6)
-	}
-	if t.ocr != "" {
-		y = draw_wrapped_block(fmt.tprintf("Text: %s", t.ocr), x, y, w, r.y + r.height - px(8), FS_SMALL, TEXT_DIM)
-	}
-	if t.caption == "" && t.ocr == "" {
-		msg: cstring = t.scored ? "Analysed without the caption model, so there is no description yet. See the log." \
-		                        : "Not analysed yet. Press Analyze to describe it and read any text in it."
-		draw_text(.Regular, msg, x, y, FS_SMALL, TEXT_FAINT)
-	}
-}
-
 // Word-wrapped text that stops at `bottom`, ending in an ellipsis if it had to.
 // Returns the y below the last line drawn.
 draw_wrapped_block :: proc(text: string, x, y, w, bottom: f32, size: f32, col: rl.Color) -> f32 {
@@ -328,40 +308,3 @@ draw_wrapped_block :: proc(text: string, x, y, w, bottom: f32, size: f32, col: r
 	return cy
 }
 
-// The inspector's picture, caption and text, for anything that is not audio.
-INSPECTOR_PREVIEW_RATIO :: 0.62
-
-inspector_preview_height :: proc(t: ^Track, w: f32) -> f32 {
-	h := w * INSPECTOR_PREVIEW_RATIO + px(12)
-	// Room for the caption and text; generous, since this only sizes the
-	// scroll area and running short would cut off the tag buttons below.
-	if t.caption != "" { h += px(20) * (f32(len(t.caption)) / 40 + 2) }
-	if t.ocr != ""     { h += px(18) * (f32(len(t.ocr)) / 45 + 2) }
-	return h
-}
-
-draw_inspector_preview :: proc(t: ^Track, index: int, x, y, w: f32) -> f32 {
-	pic := rect(x, y, w, w * INSPECTOR_PREVIEW_RATIO)
-	fill_round(pic, WAVE_BG, 4)
-	if tex, ok := thumbnail(index); ok {
-		draw_texture_fit(tex, inset(pic, px(3)))
-	} else {
-		label := strings.clone_to_cstring(kind_label(t), context.temp_allocator)
-		lw := text_w(.Bold, label, FS_BODY)
-		draw_text_mid(.Bold, label, pic.x + (pic.width - lw) * 0.5, pic.y, pic.height, FS_BODY, TEXT_FAINT)
-	}
-	cy := pic.y + pic.height + px(10)
-	if t.caption != "" {
-		section_label(x, cy, "WHAT IT SHOWS")
-		cy += px(18)
-		cy = draw_wrapped_block(t.caption, x, cy, w, cy + px(400), FS_SMALL, TEXT)
-		cy += px(6)
-	}
-	if t.ocr != "" {
-		section_label(x, cy, "TEXT IN IT")
-		cy += px(18)
-		cy = draw_wrapped_block(t.ocr, x, cy, w, cy + px(300), FS_SMALL, TEXT_DIM)
-		cy += px(6)
-	}
-	return cy
-}

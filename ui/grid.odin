@@ -13,11 +13,11 @@ package musictagger
 // files, which is nothing, and the cache means it happens once.
 
 import "core:fmt"
-import "core:strings"
+import "core:slice"
 import rl "vendor:raylib"
 
-TILE_MIN     :: 96.0
-TILE_MAX     :: 340.0
+TILE_MIN     :: 120.0
+TILE_MAX     :: 380.0
 TILE_GAP     :: 10.0
 // How many tiles' peaks to keep. Comfortably more than fit on a screen, so
 // scrolling back up finds them still there.
@@ -30,7 +30,6 @@ Grid_Peaks :: struct {
 }
 
 Grid :: struct {
-	scroll: Scroll,
 	cache:  [dynamic]Grid_Peaks,
 	clock:  u64,
 }
@@ -79,113 +78,33 @@ clear_grid_cache :: proc() {
 
 // ── drawing ─────────────────────────────────────────────────────────────────
 
-draw_grid :: proc(r: Rect) {
-	fill(r, BG)
-	if !lib.scanned {
-		draw_empty_state(r)
-		return
-	}
-
-	bar := rect(r.x, r.y, r.width, px(38))
-	draw_grid_bar(bar)
-	hline(r.x, bar.y + bar.height, r.width)
-
-	body := rect(r.x, bar.y + bar.height, r.width, r.height - bar.height)
-	if len(search.view) == 0 {
-		draw_text(.Regular, "Nothing matches this search.",
-		          body.x + px(PAD), body.y + px(24), FS_BODY, TEXT_FAINT)
-		return
-	}
-
-	tile_w := px(app.tile_size)
-	tile_h := tile_w * 0.78
-	gap    := px(TILE_GAP)
-	pad    := px(PAD)
-
-	folders := browsing_active() ? len(browse.subs) : 0
-	columns := max(int((body.width - pad * 2 + gap) / (tile_w + gap)), 1)
-	rows    := (folders + len(search.view) + columns - 1) / columns
-
-	content := f32(rows) * (tile_h + gap) + gap
-	scroll_area(&grid.scroll, body, content)
-
-	begin_clip(body)
-	defer end_clip()
-
-	first_row := max(int(grid.scroll.offset / (tile_h + gap)) - 1, 0)
-	last_row  := min(first_row + int(body.height / (tile_h + gap)) + 3, rows)
-
-	for row in first_row ..< last_row {
-		for col in 0 ..< columns {
-			index := row * columns + col
-			if index >= folders + len(search.view) { break }
-
-			x := body.x + pad + f32(col) * (tile_w + gap)
-			y := body.y + gap + f32(row) * (tile_h + gap) - grid.scroll.offset
-			cell := rect(x, y, tile_w, tile_h)
-
-			if index < folders {
-				draw_folder_tile(cell, browse.subs[index])
-			} else {
-				draw_tile(cell, search.view[index - folders])
-			}
-		}
-	}
-}
-
 // A folder, drawn the size of a tile so the grid stays a grid.
 @(private)
 draw_folder_tile :: proc(r: Rect, name: string) {
 	over := hovered(r)
 	fill_round(r, over ? PANEL_2 : PANEL, 6)
-	outline_round(r, over ? ACCENT : LINE, 6)
+	outline_round(r, over ? FOLDER_C : LINE, 6)
 	if over { ui.hover_cursor = .POINTING_HAND }
 
-	icon := min(r.height * 0.4, px(64))
-	draw_icon(.Folder, rect(r.x + (r.width - icon) * 0.5, r.y + r.height * 0.18, icon, icon),
-	          over ? ACCENT : rl.Color{120, 140, 165, 255})
+	pic := rect(r.x + px(6), r.y + px(6), r.width - px(12), r.height - px(44))
+	icon := min(pic.height * 0.7, px(96))
+	draw_icon(.Folder, rect(pic.x + (pic.width - icon) * 0.5, pic.y + (pic.height - icon) * 0.5, icon, icon),
+	          over ? FOLDER_C : rl.Color{150, 130, 90, 255})
 
-	label := elide_right(display_text(name), r.width - px(16), FS_SMALL)
-	lw := text_w(.Auto, label, FS_SMALL)
-	draw_text(.Auto, label, r.x + (r.width - lw) * 0.5, r.y + r.height * 0.66, FS_SMALL, TEXT)
-
-	count := fmt.ctprintf("%d files", subfolder_count(name))
-	cw := text_w(.Regular, count, FS_SMALL)
-	draw_text(.Regular, count, r.x + (r.width - cw) * 0.5, r.y + r.height * 0.66 + px(16),
-	          FS_SMALL, TEXT_FAINT)
+	y := pic.y + pic.height + px(6)
+	draw_text(.Auto, elide_right(display_text(name), r.width - px(16), FS_SMALL), r.x + px(8), y, FS_SMALL, TEXT)
+	n := subfolder_count(name)
+	count := fmt.ctprintf("%d item%s", n, n == 1 ? "" : "s")
+	draw_text(.Regular, count, r.x + px(8), y + px(16), FS_SMALL, TEXT_FAINT)
 
 	if clicked_in(r) { browse_into(name) }
 }
 
 @(private)
-draw_grid_bar :: proc(r: Rect) {
-	fill(r, PANEL)
-
-	count := fmt.ctprintf("%d", len(search.view))
-	draw_text_mid(.Regular, count, r.x + px(PAD), r.y, r.height, FS_SMALL, TEXT_DIM)
-
-	// The zoom, on the right where a zoom lives.
-	slider_w := px(140)
-	sl := rect(r.x + r.width - px(PAD) - slider_w, r.y + (r.height - px(16)) * 0.5, slider_w, px(16))
-	size := app.tile_size
-	if slider(sl, &size, TILE_MIN, TILE_MAX) {
-		app.tile_size = size
-	}
-	if ui.released && abs(prefs.tile_size - app.tile_size) > 0.5 {
-		prefs.tile_size = app.tile_size
-		save_prefs()
-	}
-
-	label: cstring = "Size"
-	lw := text_w(.Regular, label, FS_SMALL)
-	draw_text_mid(.Regular, label, sl.x - lw - px(8), r.y, r.height, FS_SMALL, TEXT_FAINT)
-}
-
-@(private)
-draw_tile :: proc(r: Rect, track_index: int) {
+draw_tile :: proc(r: Rect, track_index: int, vi: int) {
 	tag_drop_target(r, track_index)
 	t := &lib.tracks[track_index]
-	selected := app.selected == track_index
+	selected := app.selected == track_index || slice.contains(app.selection[:], track_index)
 	playing  := player.track == track_index
 	over     := hovered(r)
 
@@ -194,106 +113,73 @@ draw_tile :: proc(r: Rect, track_index: int) {
 	else if over           { outline_round(r, LINE, 6) }
 	if over { ui.hover_cursor = .POINTING_HAND }
 
-	// The waveform fills the top of the tile; for a picture, the picture does,
-	// and it gets more of the tile, because the picture is the point.
-	wave := rect(r.x + px(6), r.y + px(6), r.width - px(12), r.height * (has_thumbnail(t) ? 0.6 : 0.46))
-	fill_round(wave, WAVE_BG, 4)
+	// The picture takes the tile; the name and one line of detail sit under it.
+	pic := rect(r.x + px(6), r.y + px(6), r.width - px(12), r.height - px(48))
+	fill_round(pic, WAVE_BG, 4)
 
-	if has_thumbnail(t) {
-		if tex, ok := thumbnail(track_index); ok {
-			draw_texture_fit(tex, inset(wave, px(2)))
-		} else {
-			msg := strings.clone_to_cstring(kind_label(t), context.temp_allocator)
-			mw := text_w(.Bold, msg, FS_SMALL)
-			draw_text_mid(.Bold, msg, wave.x + (wave.width - mw) * 0.5, wave.y, wave.height,
-			              FS_SMALL, TEXT_FAINT)
+	drew := false
+	if t.kind == .Video && hovered(pic) {
+		// Scrubbing: where the pointer is across the tile is where in the clip
+		// the picture comes from.
+		frac := clamp((ui.mouse.x - pic.x) / max(pic.width, 1), 0, 0.999)
+		if draw_filmstrip_frame(track_index, frac, inset(pic, px(2))) {
+			drew = true
+			fill(rect(pic.x, pic.y + pic.height - px(3), pic.width * frac, px(3)), ACCENT)
 		}
-	} else if p, ok := grid_peaks(track_index); ok {
-		columns := max(int(wave.width), 1)
-		values := peak_channel(p, 0)
-		mid := wave.y + wave.height * 0.5
-		half := wave.height * 0.5 - px(2)
-
-		played: f32 = -1
-		if playing && player.duration > 0 {
-			played = player_position() / player.duration
-		}
-
-		for i in 0 ..< columns {
-			lo := len(values) * i       / columns
-			hi := len(values) * (i + 1) / columns
-			peak: u8
-			for v in values[lo:max(hi, lo + 1)] {
-				if v > peak { peak = v }
+	}
+	if !drew {
+		if has_thumbnail(t) {
+			if tex, ok := thumbnail(track_index); ok {
+				draw_texture_fit(tex, inset(pic, px(2)))
+				drew = true
 			}
-			h := max(f32(peak) / 255 * half, px(0.5))
-			x := wave.x + f32(i)
-			col := WAVE_C
-			if played >= 0 && f32(i) / f32(columns) <= played { col = WAVE_LIT }
-			rl.DrawRectangleRec({x, mid - h, 1, h * 2}, col)
+		} else if p, ok := grid_peaks(track_index); ok {
+			draw_mini_wave(inset(pic, px(6)), p, playing)
+			drew = true
 		}
-	} else {
-		msg: cstring = "…"
-		mw := text_w(.Regular, msg, FS_SMALL)
-		draw_text_mid(.Regular, msg, wave.x + (wave.width - mw) * 0.5, wave.y, wave.height,
-		              FS_SMALL, TEXT_FAINT)
+	}
+	if !drew {
+		icon := min(pic.height * 0.4, px(56))
+		draw_icon(kind_icon(t), rect(pic.x + (pic.width - icon) * 0.5, pic.y + (pic.height - icon) * 0.5, icon, icon),
+		          kind_color(t))
 	}
 
-	// Name, then whatever else fits.
+	// What kind of file, in the corner, where it does not cover the picture.
+	badge := rect(pic.x + px(4), pic.y + px(4), px(22), px(22))
+	if drew && r.width >= px(120) {
+		fill_round(badge, rl.Color{0, 0, 0, 150}, 4)
+		draw_icon(kind_icon(t), inset(badge, px(3)), kind_color(t))
+	}
+	// The length, bottom right of the picture, the way a video site shows it.
+	if t.duration > 0 && r.width >= px(120) {
+		label := fmt.ctprintf("%s", fmt_time(t.duration))
+		lw := text_w(.Regular, label, FS_SMALL) + px(10)
+		lr := rect(pic.x + pic.width - lw - px(4), pic.y + pic.height - px(22), lw, px(18))
+		fill_round(lr, rl.Color{0, 0, 0, 170}, 4)
+		draw_text_mid(.Regular, label, lr.x + px(5), lr.y, lr.height, FS_SMALL, TEXT)
+	}
+
 	text_x := r.x + px(8)
 	text_w_avail := r.width - px(16)
-	y := wave.y + wave.height + px(6)
-
+	y := pic.y + pic.height + px(6)
 	draw_text(.Auto, elide_right(display_text(t.name), text_w_avail, FS_SMALL),
 	          text_x, y, FS_SMALL, selected ? TEXT : rl.Color{214, 220, 230, 255})
-	y += px(16)
+	y += px(17)
 
-	// Tags as coloured dots when the tile is small, as chips when there is room.
-	if r.width >= px(150) {
-		cx := text_x
-		for tag, i in t.tags {
-			if i >= 4 { break }
-			label := strings.clone_to_cstring(tag, context.temp_allocator)
-			kind := i < len(t.kinds) ? t.kinds[i] : tag_kind(tag)
-			width := (kind == .Favorite ? px(13) : text_w(.Regular, label, FS_SMALL)) + px(14)
-			if cx + width > text_x + text_w_avail { break }
-			cw, body_hit, _ := chip(cx, y, label, tag_color_of(tag), false,
-			                        kind == .Favorite ? .Star : .None)
-			if body_hit { add_chip(tag) }
-			cx += cw + px(4)
-		}
-	} else {
-		cx := text_x
-		for tag, i in t.tags {
-			if i >= 8 { break }
-			rl.DrawCircleV({cx + px(3), y + px(7)}, px(3), tag_color_of(tag))
-			cx += px(9)
-		}
+	// Tags as coloured dots, and how many; the chips live in the list and the
+	// preview, where there is room to read them.
+	cx := text_x
+	for tag, i in t.tags {
+		if i >= 10 || cx > text_x + text_w_avail - px(40) { break }
+		rl.DrawCircleV({cx + px(3.5), y + px(7)}, px(3.5), tag_color_of(tag))
+		cx += px(10)
 	}
-
-	// The duration sits bottom right, out of the way of the name.
-	if t.duration > 0 {
-		time_label := fmt.ctprintf("%s", fmt_time(t.duration))
-		tw := text_w(.Regular, time_label, FS_SMALL)
-		draw_text(.Regular, time_label, r.x + r.width - tw - px(8),
-		          r.y + r.height - px(18), FS_SMALL, TEXT_FAINT)
+	meta := type_label(t)
+	if len(t.tags) > 0 {
+		meta = fmt.ctprintf("%d tag%s  ·  %s", len(t.tags), len(t.tags) == 1 ? "" : "s", type_label(t))
 	}
+	mw := text_w(.Regular, meta, FS_SMALL)
+	draw_text(.Regular, meta, r.x + r.width - mw - px(8), y, FS_SMALL, TEXT_FAINT)
 
-	if clicked_in(r) {
-		shift := rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
-		ctrl  := rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)
-		if ctrl {
-			toggle_in_selection(track_index)
-		} else if !shift {
-			clear(&app.selection)
-			play_track(track_index)
-		}
-		app.selected  = track_index
-		app.inspector = true
-
-		// A tile drags like a row does.
-		app.press_index = track_index
-		app.press_pos   = ui.mouse
-		app.press_armed = true
-	}
+	browser_item_input(r, track_index, vi)
 }

@@ -30,7 +30,14 @@ POINTS = 260_000
 # Yaw, pitch in degrees. Three-quarter views read best; the fourth is the back.
 VIEWS = ((35, 20), (125, 20), (215, 20), (305, 35))
 
-NEEDS_BLENDER = {".fbx", ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc"}
+NEEDS_BLENDER = {".fbx", ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc", ".3ds", ".x3d", ".wrl"}
+
+# Formats only their own program can open. Nothing free reads them, so the
+# file is listed and tagged by name, and the preview says to export it.
+NEEDS_OWN_APP = {
+    ".c4d": "Cinema 4D", ".max": "3ds Max", ".ma": "Maya", ".mb": "Maya",
+    ".skp": "SketchUp", ".lwo": "LightWave", ".ztl": "ZBrush", ".zpr": "ZBrush",
+}
 
 
 def blender_path() -> str | None:
@@ -60,6 +67,11 @@ elif ext in ("usd", "usda", "usdc", "usdz"):
     bpy.ops.wm.usd_import(filepath=src)
 elif ext == "abc":
     bpy.ops.wm.alembic_import(filepath=src)
+elif ext == "3ds":
+    # An extension since Blender 4.2; present in most installs.
+    bpy.ops.import_scene.max3ds(filepath=src)
+elif ext in ("x3d", "wrl"):
+    bpy.ops.import_scene.x3d(filepath=src)
 bpy.ops.export_scene.gltf(filepath=dst, export_format="GLB")
 """
 
@@ -107,8 +119,20 @@ def load_mesh(path: Path):
 
     facts: dict = {}
     src = path
-    if path.suffix.lower() in NEEDS_BLENDER:
+    suffix = path.suffix.lower()
+    if suffix in NEEDS_OWN_APP:
+        raise RuntimeError(f"{path.suffix} files open only in {NEEDS_OWN_APP[suffix]}; "
+                           f"export it as FBX, OBJ or glTF to preview and analyse it")
+    if suffix in NEEDS_BLENDER:
         src = _via_blender(path)
+    elif suffix == ".bbmodel":
+        from .bbmodel import to_glb
+
+        src = to_glb(path, Path(tempfile.mkdtemp(prefix="mt3d-")) / "model.glb")
+    elif suffix == ".vox":
+        from .voxel import to_glb as vox_to_glb
+
+        src = vox_to_glb(path, Path(tempfile.mkdtemp(prefix="mt3d-")) / "model.glb")
     if src.suffix.lower() in (".glb", ".gltf"):
         facts.update(gltf_facts(src))
 

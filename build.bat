@@ -39,18 +39,38 @@ if not errorlevel 1 (
     pause & exit /b 1
 )
 
-echo Building MusicTagger.exe...
+:: Which commit this is, shown in the title bar and in Settings, About. git
+:: is used when it is on PATH; GitHub Desktop does not put it there, so the
+:: commit is otherwise read straight out of the .git folder.
+set "BUILD_ID=unknown"
+for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set "BUILD_ID=%%i"
+set "GITHEAD="
+set "GITREF="
+if "%BUILD_ID%"=="unknown" if exist ".git\HEAD" set /p GITHEAD=<".git\HEAD"
+if defined GITHEAD if "%GITHEAD:~0,5%"=="ref: " set "GITREF=%GITHEAD:~5%"
+if defined GITHEAD if not "%GITHEAD:~0,5%"=="ref: " set "BUILD_ID=%GITHEAD%"
+if defined GITREF if exist ".git\%GITREF:/=\%" set /p BUILD_ID=<".git\%GITREF:/=\%"
+if defined GITREF if "%BUILD_ID%"=="unknown" if exist ".git\packed-refs" for /f "tokens=1" %%a in ('findstr /e /c:" %GITREF%" ".git\packed-refs"') do set "BUILD_ID=%%a"
+if not "%BUILD_ID%"=="unknown" set "BUILD_ID=%BUILD_ID:~0,7%"
+
+echo Building MusicTagger.exe (build %BUILD_ID%)...
 :: -subsystem:windows keeps a console from opening behind the window.
-"%ODIN%" build ui -out:MusicTagger.exe -o:speed -subsystem:windows -resource:app.rc
+"%ODIN%" build ui -out:MusicTagger.exe -o:speed -subsystem:windows -resource:app.rc -define:BUILD_ID=%BUILD_ID%
 if errorlevel 1 (
-    echo ERROR: Build failed.
+    echo.
+    echo   ==========================================================
+    echo     BUILD FAILED. MusicTagger.exe was NOT updated.
+    echo     The old version is still there. Copy the error above
+    echo     and send it over.
+    echo   ==========================================================
+    echo.
     pause & exit /b 1
 )
 
 :: A second console build of the same code, for the self test. It is the same
 :: program: --selftest needs a console to print to.
 echo Building mtag-test.exe...
-"%ODIN%" build ui -out:mtag-test.exe -o:speed
+"%ODIN%" build ui -out:mtag-test.exe -o:speed -define:BUILD_ID=%BUILD_ID%
 if errorlevel 1 (
     echo ERROR: Test build failed.
     pause & exit /b 1
@@ -58,6 +78,8 @@ if errorlevel 1 (
 
 echo.
 echo Ready: %~dp0MusicTagger.exe
+echo The title bar should read "build %BUILD_ID%". If it shows something else,
+echo an old copy is running.
 echo Check it with: mtag-test.exe --selftest "<your library folder>"
 pause
 

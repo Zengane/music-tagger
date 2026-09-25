@@ -33,6 +33,11 @@ GAME_C    :: rl.Color{176, 149, 250, 255}
 OTHER_C   :: rl.Color{157, 166, 181, 255}
 VISUAL_C  :: rl.Color{ 96, 200, 190, 255}
 FAV_C     :: rl.Color{255, 214, 102, 255}
+// The kinds of file, for their icons in the sidebar and the browser.
+VIDEO_C   :: rl.Color{240, 128, 128, 255}
+MODEL_C   :: rl.Color{186, 150, 250, 255}
+DOC_C     :: rl.Color{170, 182, 200, 255}
+FOLDER_C  :: rl.Color{232, 190, 104, 255}
 
 WARN_C    :: rl.Color{248, 180,  76, 255}
 BAD_C     :: rl.Color{243, 113, 113, 255}
@@ -80,6 +85,7 @@ RAIL_W     :: 236.0
 INSPECT_W  :: 364.0
 TAG_BAR_H  :: 46.0
 DOCK_H     :: 116.0
+DOCK_COMPACT_H :: 44.0 // the player with its transport only
 ROW_H      :: 30.0
 HEAD_H     :: 26.0
 PAD        :: 12.0

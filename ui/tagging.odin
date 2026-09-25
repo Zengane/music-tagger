@@ -864,6 +864,7 @@ open_tagging_menu :: proc(index: int) {
     open_context_menu(&app.track_menu, index)
 }
 reassign_media_kind :: proc(effects: bool) {
+	defer invalidate_folder_tree()
     if folder_copy.running || scan.running || filing_busy() || job.phase == .Running || job.phase == .Loading { toast("Finish the current job before changing media type"); return }
     failed := 0
     targets := make([dynamic]int, 0, 8, context.temp_allocator)

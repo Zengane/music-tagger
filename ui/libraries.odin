@@ -208,3 +208,11 @@ path_in_library :: proc(path: string) -> int {
 	}
 	return -1
 }
+
+// The open library's name as the sidebar shows it, rather than its folder's.
+library_display_name :: proc() -> string {
+	for entry in libraries {
+		if path_equal(entry.path, lib.root) { return entry.name }
+	}
+	return path_leaf(lib.root)
+}

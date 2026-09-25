@@ -119,8 +119,8 @@ draw_waveform :: proc(r: Rect) {
 		centre_message(r, "Select a track to see its waveform")
 		return
 	}
-	if player.track < len(lib.tracks) && lib.tracks[player.track].kind != .Audio {
-		draw_media_preview(r, player.track)
+	if player.track < len(lib.tracks) && lib.tracks[player.track].kind != .Audio && lib.tracks[player.track].kind != .Video {
+		centre_message(r, "Pictures, models and documents show in the preview panel")
 		return
 	}
 	if !player.has_peaks {

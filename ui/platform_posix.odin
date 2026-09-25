@@ -288,6 +288,26 @@ reveal_in_file_manager :: proc(path: string) {
 // The system's folder picker: Finder's on macOS; zenity (GNOME and most
 // others) or kdialog (KDE) on Linux. Blocks until it closes. ok = false when
 // cancelled or when no picker is installed; the path can still be typed.
+// Whether a folder picker can be shown at all. macOS always has one; Linux
+// needs zenity or kdialog, and without either the path is typed instead.
+folder_picker_available :: proc() -> bool {
+	when ODIN_OS == .Darwin {
+		return true
+	} else {
+		@(static) known, answer: bool
+		if known { return answer }
+		known = true
+		for dir in strings.split(os.get_env("PATH", context.temp_allocator), ":", context.temp_allocator) {
+			if dir == "" { continue }
+			if os.exists(join_path({dir, "zenity"})) || os.exists(join_path({dir, "kdialog"})) {
+				answer = true
+				break
+			}
+		}
+		return answer
+	}
+}
+
 choose_folder :: proc(title: string, allocator := context.allocator) -> (path: string, ok: bool) {
 	out: []byte
 	code: u32

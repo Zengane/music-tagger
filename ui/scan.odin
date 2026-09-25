@@ -331,6 +331,9 @@ is_skipped_name :: proc(lower_name: string) -> bool {
 // How many tracks carry each tag. The rail shows these next to every tag, so
 // you can see the shape of the library before searching it.
 count_tags :: proc() {
+	// Whatever changed the tags may have changed the files or their kinds too;
+	// the sidebar's tree is recounted the next time it draws.
+	invalidate_folder_tree()
 	if lib.counts != nil { delete(lib.counts) }
 	lib.counts = make(map[string]int)
 	lib.kinds = {}

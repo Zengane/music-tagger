@@ -55,6 +55,35 @@ Icon :: enum {
 	Scissors,
 	Import,
 	Span,
+	Music,
+	Sfx,
+	Image,
+	Video,
+	Model,
+	Document,
+	Layers,
+	List,
+	Grid,
+	Sort_Up,
+	Sort_Down,
+	Library,
+	Map,
+	Tag,
+	Sparkles,
+	Save,
+	Undo,
+	Refresh,
+	Folder_Open,
+	Expand,
+	Rotate,
+	Info,
+	Cpu,
+	Drive,
+	File,
+	Zoom_In,
+	Zoom_Out,
+	Up_Folder,
+	Folder_Tree,
 }
 
 // A filled triangle that does not care which way round its points are given.
@@ -111,7 +140,9 @@ draw_icon :: proc(icon: Icon, r: Rect, col: rl.Color) {
 	}
 
 	// The stroke thins with the icon but never disappears.
-	thickness := max(ICON_STROKE_W * scale, 1.2)
+	// Capped, so a big icon keeps a drawn line rather than turning into a
+	// heavy outline.
+	thickness := clamp(ICON_STROKE_W * scale, 1.2, px(2.6))
 	round := thickness * 0.5
 	// Below about three quarters of a pixel a disc only covers pixels the line
 	// already drew.

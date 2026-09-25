@@ -15,7 +15,7 @@ check_topbar_layout :: proc() -> bool {
 	worst_width := f32(0)
 	worst: string
 
-	for width := f32(560); width <= 2600; width += 40 {
+	for width := f32(1040); width <= 2600; width += 40 {
 		clear(&layout_audit.rects)
 		clear(&layout_audit.names)
 		layout_audit.on = true
@@ -32,6 +32,9 @@ check_topbar_layout :: proc() -> bool {
 			for j in i + 1 ..< len(layout_audit.rects) {
 				a := layout_audit.rects[i]
 				c := layout_audit.rects[j]
+				// One control registered twice (a named slot and the icon
+				// button inside it) is not two controls.
+				if a == c { continue }
 				// A shared edge is not an overlap; a shared pixel is.
 				if a.x + a.width <= c.x + 0.5 || c.x + c.width <= a.x + 0.5 { continue }
 				if a.y + a.height <= c.y + 0.5 || c.y + c.height <= a.y + 0.5 { continue }
@@ -45,7 +48,7 @@ check_topbar_layout :: proc() -> bool {
 	}
 
 	if ok {
-		fmt.println("top bar: nothing overlaps at any width from 560 to 2600")
+		fmt.println("top bar: nothing overlaps at any width from 1040 (the smallest window) to 2600")
 	} else {
 		fmt.printf("top bar: OVERLAP at %.0f wide - %s\n", worst_width, worst)
 	}

@@ -23,7 +23,7 @@ import "core:strings"
 import "core:unicode/utf8"
 import rl "vendor:raylib"
 
-View_Mode :: enum { List, Grid, Map, Tag }
+View_Mode :: enum { Browse, Map, Tag }
 
 App :: struct {
 	view:           View_Mode,
@@ -54,9 +54,12 @@ App :: struct {
 	inspector:      bool,
 	query:          Text_Field,
 	folder:         Text_Field,
-	list_scroll:    Scroll,
+	browser_scroll: Scroll,
 	rail_scroll:    Scroll,
 	insp_scroll:    Scroll,
+	insp_open:      [Insp_Section]bool,
+	insp_content_h: f32,
+	tag_input:      Text_Field, // the preview panel's add-a-tag box
 	recursive:      bool,
 	include_sfx:    bool,
 	settings_open:  bool,
@@ -92,14 +95,20 @@ App :: struct {
 	track_menu:     Context_Menu,
 	tag_add_menu:   Context_Menu,
 	sort_menu:      Context_Menu,
+	toolbar_menu:   Context_Menu,
+	folder_menu:    Context_Menu,
+	folder_menu_node: int,
 	// Whether selecting a track should open the inspector. Closing the panel
 	// turns this off, so it stops reappearing; opening it turns it back on.
 	inspector_auto: bool,
 	// Whether a selection drag carries a range that references the whole file,
 	// or a rendered clip of just that part.
 	drag_as_range:  bool,
-	// The grid's zoom.
-	tile_size:      f32,
+	// The browser's zoom: 0 is a tight list, 1 is the biggest tiles.
+	zoom:           f32,
+	// The sidebar's sections, open or folded, and how tall it was last frame.
+	rail_open:      [Rail_Section]bool,
+	rail_content_h: f32,
 	// Panel widths, dragged by the splitters and remembered between runs.
 	rail_w:         f32,
 	inspect_w:      f32,
@@ -121,7 +130,8 @@ app: App = {
 	inspector_auto = true,
 	rail_w       = RAIL_W,
 	inspect_w    = INSPECT_W,
-	tile_size    = 168,
+	rail_open    = {.Libraries = true, .Show = true, .Folders = true, .Tags = true},
+	insp_open    = {.About = true, .Tags = true, .Palette = true, .Palette_Media = false, .Model = true},
 	drag_as_range = true,
 }
 
@@ -233,7 +243,7 @@ main :: proc() {
 	} else {
 		rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_HIGHDPI})
 	}
-	rl.InitWindow(1440, 900, "Music Tagger")
+	rl.InitWindow(1440, 900, fmt.ctprintf("Music Tagger — build %s", build_label()))
 	defer rl.CloseWindow()
 	rl.SetWindowMinSize(1040, 640)
 	set_window_icon()
@@ -253,10 +263,10 @@ main :: proc() {
 	player.shuffle_seed = u64(rl.GetTime() * 1e6) | 1
 	app.inspector_auto = prefs.inspector_auto
 	app.inspector      = prefs.inspector_auto
-	app.tile_size    = clamp(prefs.tile_size, TILE_MIN, TILE_MAX)
-	browse.enabled   = prefs.folder_view
+	app.zoom          = prefs.zoom
+	search.sort       = prefs.sort
+	search.descending = prefs.sort_desc
 	tagging.hide_tagged = prefs.hide_tagged
-	browse.recursive = true
 
 	init_tag_library()
 	build_fonts(library_runes())
@@ -271,6 +281,7 @@ main :: proc() {
 	start_wave_worker()
 	defer stop_wave_worker()
 	defer stop_thumbnails()
+	defer stop_previews()
 	defer stop_search_server()
 	defer stop_warmup()
 
@@ -293,6 +304,7 @@ main :: proc() {
 
 		if poll_scan() {
 			clear_grid_cache()
+			clear_previews()
 			build_fonts(library_runes())
 			search.dirty = true
 			app.selected = -1
@@ -311,6 +323,7 @@ main :: proc() {
 		}
 		update_audio()
 		begin_thumbnail_frame()
+		begin_preview_frame()
 		poll_search_server()
 		handle_dropped_files()
 		poll_folder_imports()
@@ -330,6 +343,8 @@ main :: proc() {
 		rl.ClearBackground(BG)
 		draw_app()
 		finish_tag_drag()
+		// F12 saves what is on screen, before EndDrawing swaps it away.
+		if rl.IsKeyPressed(.F12) { save_screenshot() }
 		rl.EndDrawing()
 		end_ui()
 		end_main_frame()
@@ -400,11 +415,17 @@ draw_app :: proc() {
 	// without this they would consume its clicks.
 	ui.modal_open = app.shortcuts_open || app.settings_open || app.suggest_open || app.tag_editor ||
 	                app.library_menu.open || app.track_menu.open ||
-	                app.tag_add_menu.open || app.sort_menu.open
+	                app.tag_add_menu.open || app.sort_menu.open ||
+	                app.toolbar_menu.open || app.folder_menu.open || viewer.open
 
 	title := rect(0, 0, W, px(TITLEBAR_H))
 	top  := rect(0, title.height, W, px(TOPBAR_H) * f32(topbar_rows(W)))
-	dock := rect(0, H - px(app.dock_h), W, px(app.dock_h))
+	// The player is for sound. Looking through pictures, models or documents
+	// it shrinks to its transport, unless something is playing.
+	dock_full := search.kind == .All || search.kind == .Music || search.kind == .Effects ||
+	             search.kind == .Video || player.playing
+	dock_h := dock_full ? px(app.dock_h) : px(DOCK_COMPACT_H)
+	dock := rect(0, H - dock_h, W, dock_h)
 	body_y := top.y + top.height
 	body_h := H - body_y - dock.height
 
@@ -444,25 +465,17 @@ draw_app :: proc() {
 	// rows swallowed every press aimed at the handle. Only the input happens
 	// here — the line is drawn after the player, or the player's own background
 	// would cover it, which is why it never lit up.
-	splitter_row_input(rawptr(&app.dock_h), dock.y, dock.x, dock.width, &app.dock_h, DOCK_H, 420)
+	if dock_full { splitter_row_input(rawptr(&app.dock_h), dock.y, dock.x, dock.width, &app.dock_h, DOCK_H, 420) }
 
 	draw_rail(rail)
-	content := list
-	if lib.scanned && browse.enabled && (app.view == .List || app.view == .Grid) {
-		crumb := rect(list.x, list.y, list.width, px(30))
-		draw_breadcrumb(crumb)
-		hline(crumb.x, crumb.y + crumb.height, crumb.width)
-		content = rect(list.x, crumb.y + crumb.height, list.width, list.height - crumb.height)
-	}
 
 	switch app.view {
-	case .List: draw_list(content)
-	case .Grid: draw_grid(content)
+	case .Browse: draw_browser(list)
 	case .Map:  draw_nodes(list)
 	case .Tag:  draw_tagging(list)
 	}
 	if insp_w > 0 { draw_inspector(insp) }
-	splitter_row_line(rawptr(&app.dock_h), dock.y, dock.x, dock.width)
+	if dock_full { splitter_row_line(rawptr(&app.dock_h), dock.y, dock.x, dock.width) }
 	draw_dock(dock)
 	draw_topbar(top) // last, so its completion menu sits above the list
 	draw_titlebar(title)
@@ -514,23 +527,19 @@ draw_app :: proc() {
 
 	if app.sort_menu.open {
 		begin_modal()
-		chosen := context_menu(&app.sort_menu, {
-			"Name", "Length", "Brightest first", "Punchiest first",
-			"Loudest first", "Building first", "Most like the selected",
-		})
-		if chosen >= 0 {
-			if Sort_Mode(chosen) == .Similar {
-				if app.selected >= 0 {
-					sort_by_similarity_to(app.selected)
-					toast("sorted by how close everything is to this one")
-				} else {
-					toast("pick a track first")
-				}
-			} else {
-				set_sort_mode(Sort_Mode(chosen))
-			}
-			// Sorting changes the list's order, which the map does not have.
-		}
+		draw_sort_menu()
+		end_modal()
+	}
+
+	if app.toolbar_menu.open {
+		begin_modal()
+		draw_toolbar_menu()
+		end_modal()
+	}
+
+	if app.folder_menu.open {
+		begin_modal()
+		draw_folder_menu()
 		end_modal()
 	}
 
@@ -559,7 +568,13 @@ draw_app :: proc() {
 
 	if app.settings_open {
 		begin_modal()
-		draw_settings(rect(W - px(340) - px(PAD), top.height + px(6), px(340), px(500)))
+		draw_settings(rect(0, 0, W, H))
+		end_modal()
+	}
+
+	if viewer.open {
+		begin_modal()
+		draw_viewer(rect(0, 0, W, H))
 		end_modal()
 	}
 
@@ -613,308 +628,6 @@ draw_toast :: proc(r: Rect) {
 	draw_text_mid(.Regular, label, box.x + px(10), box.y, box.height, FS_SMALL, TEXT)
 }
 
-// ── top bar ─────────────────────────────────────────────────────────────────
-
-@(private)
-// How many rows the top bar needs at this width.
-//
-// One when everything fits side by side. Two when it does not — which is the
-// case on a portrait monitor, where the bar is half the width it was designed
-// for. Dropping controls was the previous answer and it was the wrong one: the
-// things being dropped are the ones you reach for most, and they were being
-// dropped exactly when the window was small enough that finding them elsewhere
-// was hardest.
-topbar_rows :: proc(width: f32) -> int {
-	return width < topbar_needed_width() ? 2 : 1
-}
-
-// What one row would actually need, added up rather than guessed at.
-//
-// A fixed number was wrong twice over: it is in design units, so it moved with
-// the interface scale and wrapped a window that had plenty of room, and it took
-// no account of the buttons that come and go — Undo and Save are only there
-// when there is something to undo or save. Measuring means the bar stays on one
-// row for exactly as long as one row works.
-@(private)
-topbar_needed_width :: proc() -> f32 {
-	// Left: the panel toggle, the four views, the three kinds, the sort menu.
-	need := px(PAD) + px(32) + px(212 + 10) + kind_filter_width() + px(8) + px(104 + 14)
-
-	// Right: the two panel icons, and whichever action buttons exist now.
-	need += px(30 + 4 + 28) + px(GAP) + px(PAD)
-
-	busy := job.phase == .Loading || job.phase == .Running
-	analyze_label: cstring = "Analyze"
-	if busy {
-		analyze_label = "Stop"
-	} else if len(search.view) > 0 && len(search.view) < len(lib.tracks) {
-		analyze_label = fmt.ctprintf("Analyze %d shown", len(search.view))
-	} else if app.selected >= 0 {
-		analyze_label = "Analyze track"
-	}
-	need += text_w(.Regular, analyze_label, FS_BODY) + px(24) + px(GAP)
-
-	if can_undo() {
-		label := elide_right(fmt.tprintf("Undo %s", undo_label()), px(150), FS_SMALL)
-		need += text_w(.Regular, label, FS_SMALL) + px(20) + px(GAP)
-	}
-	if dirty := count_dirty(); dirty > 0 {
-		need += text_w(.Regular, fmt.ctprintf("Save %d", dirty), FS_BODY) + px(24) + px(GAP)
-	}
-	need += text_w(.Regular, status_summary(), FS_SMALL) + px(GAP * 2)
-
-	// And a search box wide enough to be worth typing in.
-	return need + px(260)
-}
-
-@(private)
-draw_topbar :: proc(r: Rect) {
-	fill(r, PANEL)
-
-	two_rows := topbar_rows(r.width) == 2
-	row_h := px(TOPBAR_H)
-
-	// Row one on a narrow window, or the left half of the single row.
-	left := rect(r.x, r.y, r.width, row_h)
-	// Row two, or the right half.
-	right_row := two_rows ? rect(r.x, r.y + row_h, r.width, row_h) : left
-
-	x := px(PAD)
-	panel_toggle := rect(x, left.y + (row_h - px(26)) * 0.5, px(26), px(26))
-	if icon_button(panel_toggle, app.rail_visible ? .Panel_Left_On : .Panel_Left_Off) {
-		app.rail_visible = !app.rail_visible
-		prefs.rail_visible = app.rail_visible
-		save_prefs()
-	}
-	x += px(32)
-
-	x += draw_view_switch(rect(x, left.y + (row_h - px(28)) * 0.5, px(212), px(28))) + px(10)
-	x += draw_kind_filter(rect(x, left.y + (row_h - px(28)) * 0.5, kind_filter_width(), px(28))) + px(8)
-	x += draw_sort_control(rect(x, left.y + (row_h - px(28)) * 0.5, px(104), px(28))) + px(14)
-
-	// Everything on the right, laid out from the right edge inward. Each one
-	// moves the edge along, so two of them can never land on the same pixels —
-	// which is the whole of what went wrong before.
-	edge := r.width - px(PAD)
-	y := right_row.y + (row_h - px(28)) * 0.5
-
-	gear := rect(edge - px(30), y, px(28), px(28))
-	tip(gear, "Settings, and the keyboard shortcuts")
-	if icon_button(gear, .Settings) { app.settings_open = !app.settings_open }
-	edge = gear.x - px(4)
-
-	panel_right := rect(edge - px(28), y, px(28), px(28))
-	if icon_button(panel_right, app.inspector ? .Panel_Right_On : .Panel_Right_Off) {
-		app.inspector        = !app.inspector
-		app.inspector_auto   = app.inspector
-		prefs.inspector_auto = app.inspector
-		save_prefs()
-	}
-	edge = panel_right.x - px(GAP)
-
-	if can_undo() {
-		label := elide_right(fmt.tprintf("Undo %s", undo_label()), px(150), FS_SMALL)
-		w := text_w(.Regular, label, FS_SMALL) + px(20)
-		u := rect(edge - w, y, w, px(28))
-		if button(u, label, .Ghost) {
-			what, n := undo_last()
-			toast(fmt.tprintf("undid %s (%d files)", what, n))
-		}
-		edge = u.x - px(GAP)
-	}
-
-	dirty := count_dirty()
-	if dirty > 0 {
-		label := fmt.ctprintf("Save %d", dirty)
-		w := text_w(.Regular, label, FS_BODY) + px(24)
-		b := rect(edge - w, y, w, px(28))
-		if button(b, label, .Primary) {
-			saved, failed, err := save_all_dirty()
-			if failed > 0 {
-				toast(fmt.tprintf("saved %d, %d failed: %s", saved, failed, err))
-			} else {
-				toast(fmt.tprintf("saved %d sidecars", saved))
-			}
-		}
-		edge = b.x - px(GAP)
-	}
-
-	busy := job.phase == .Loading || job.phase == .Running
-	analyze_label: cstring = "Analyze"
-	if busy {
-		analyze_label = "Stop"
-	} else if len(search.view) > 0 && len(search.view) < len(lib.tracks) {
-		analyze_label = fmt.ctprintf("Analyze %d shown", len(search.view))
-	} else if app.selected >= 0 {
-		analyze_label = "Analyze track"
-	}
-	aw := text_w(.Regular, analyze_label, FS_BODY) + px(24)
-	ab := rect(edge - aw, y, aw, px(28))
-	analyze_tip := busy ? "Stop the model" : "Run the model over what is on screen, applying the tags it is sure of"
-	tip(ab, analyze_tip)
-	if button(ab, analyze_label, busy ? .Danger : .Normal, lib.scanned) {
-		if busy {
-			cancel_analyze()
-			toast("tagging stopped")
-		} else {
-			start_analysis_for_current()
-		}
-	}
-	edge = ab.x - px(GAP)
-
-	counts := status_summary()
-	cw := text_w(.Regular, counts, FS_SMALL)
-	if edge - cw > px(PAD) + px(200) || two_rows {
-		audit_rect(rect(edge - cw, right_row.y + px(8), cw, row_h - px(16)), "count")
-		draw_text_mid(.Regular, counts, edge - cw, right_row.y, row_h, FS_SMALL, TEXT_DIM)
-		edge -= cw + px(GAP * 2)
-	}
-
-	// The search box takes what is left. On two rows that is the whole of the
-	// second row up to the buttons; on one it is the gap in the middle.
-	search_x := two_rows ? r.x + px(PAD) : x
-	search_w := max(edge - search_x, px(60))
-	search_box := rect(search_x, right_row.y + (row_h - px(30)) * 0.5, search_w, px(30))
-	audit_rect(search_box, "search")
-	draw_search(search_box)
-
-
-}
-
-// List or map. A segmented pair rather than two buttons, because they are one
-// choice and only one can be on.
-@(private)
-draw_view_switch :: proc(r: Rect) -> f32 {
-	fill_round(r, PANEL_2)
-	half := r.width / 4
-
-	labels := [4]cstring{"List", "Grid", "Map", "Tag"}
-	for i in 0 ..< 4 {
-		cell := rect(r.x + half * f32(i), r.y, half, r.height)
-		on := int(app.view) == i
-		if on { fill_round(inset(cell, px(2)), ACCENT_DK, 4) }
-		else if hovered(cell) { ui.hover_cursor = .POINTING_HAND }
-
-		lw := text_w(.Regular, labels[i], FS_BODY)
-		draw_text_mid(.Regular, labels[i], cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
-		              FS_BODY, on ? TEXT : TEXT_DIM)
-		if clicked_in(cell) { set_view(View_Mode(i)) }
-	}
-	return r.width
-}
-
-// Which kind of file is showing. Music and effects use different vocabularies
-// and ways of working, so the choice is top level rather than buried in a
-// query. Images, video, 3D and documents get a segment each, but only when the
-// library holds some: a music library looks exactly as it always did.
-KIND_SEGMENT_W :: 62.0
-
-@(private)
-kind_filters_shown :: proc() -> []Kind_Filter {
-	@(static) shown: [len(Kind_Filter)]Kind_Filter
-	n := 0
-	for k in ([]Kind_Filter{.All, .Music, .Effects}) { shown[n] = k; n += 1 }
-	if .Image    in lib.kinds { shown[n] = .Images;    n += 1 }
-	if .Video    in lib.kinds { shown[n] = .Video;     n += 1 }
-	if .Model    in lib.kinds { shown[n] = .Models;    n += 1 }
-	if .Document in lib.kinds { shown[n] = .Documents; n += 1 }
-	// A filter left on after its files went away would hide everything.
-	found := false
-	for k in shown[:n] { if k == search.kind { found = true } }
-	if !found { search.kind = .All; search.dirty = true }
-	return shown[:n]
-}
-
-@(private)
-kind_filter_label :: proc(k: Kind_Filter) -> cstring {
-	switch k {
-	case .All:       return "All"
-	case .Music:     return "Music"
-	case .Effects:   return "Effects"
-	case .Images:    return "Images"
-	case .Video:     return "Video"
-	case .Models:    return "3D"
-	case .Documents: return "Docs"
-	}
-	return ""
-}
-
-@(private)
-kind_filter_width :: proc() -> f32 {
-	return px(KIND_SEGMENT_W) * f32(len(kind_filters_shown()))
-}
-
-@(private)
-draw_kind_filter :: proc(r: Rect) -> f32 {
-	fill_round(r, PANEL_2)
-	kinds := kind_filters_shown()
-	cell_w := r.width / f32(len(kinds))
-
-	for k, i in kinds {
-		cell := rect(r.x + cell_w * f32(i), r.y, cell_w, r.height)
-		on := search.kind == k
-		if on { fill_round(inset(cell, px(2)), ACCENT_DK, 4) }
-		else if hovered(cell) { ui.hover_cursor = .POINTING_HAND }
-
-		label := kind_filter_label(k)
-		lw := text_w(.Regular, label, FS_SMALL)
-		draw_text_mid(.Regular, label, cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
-		              FS_SMALL, on ? TEXT : TEXT_DIM)
-		if clicked_in(cell) {
-			set_kind_filter(k)
-			clear(&app.selection)
-			invalidate_nodes()
-			invalidate_tagging()
-		}
-	}
-	return r.width
-}
-
-// How the results are ordered. A dropdown rather than a row of buttons: there
-// are seven and only one is on.
-@(private)
-draw_sort_control :: proc(r: Rect) -> f32 {
-	label := fmt.ctprintf("%s", sort_mode_name(search.sort))
-	over := hovered(r)
-
-	fill_round(r, over ? PANEL_3 : PANEL_2)
-	outline_round(r, LINE)
-	if over { ui.hover_cursor = .POINTING_HAND }
-
-	draw_text_mid(.Regular, label, r.x + px(10), r.y, r.height, FS_SMALL,
-	              search.sort == .Name ? TEXT_DIM : ACCENT)
-	draw_icon(.Caret_Down, rect(r.x + r.width - px(20), r.y, px(16), r.height), TEXT_FAINT)
-
-	if clicked_in(r) { open_context_menu(&app.sort_menu, 0) }
-	return r.width
-}
-
-set_view :: proc(mode: View_Mode) {
-	if app.view == mode { return }
-	app.view = mode
-	// The map is laid out from whatever is in view, so it is rebuilt on entry
-	// rather than kept in step with every keystroke in the search box.
-	if mode == .Map { invalidate_nodes() }
-	if mode == .Tag { invalidate_tagging() }
-}
-
-@(private)
-status_summary :: proc() -> cstring {
-	if folder_copy.running { return fmt.ctprintf("copying into library: %d / %d", folder_copy.done, folder_copy.total) }
-	if scan.running { return fmt.ctprintf("scanning… %d found", scan_progress()) }
-	if done, total, running := waveform_warmup(); running && total > 0 {
-		return fmt.ctprintf("waveforms %d / %d", done, total)
-	}
-	if job.phase == .Loading { return fmt.ctprintf("%s", job.detail) }
-	if job.phase == .Running { return fmt.ctprintf("tagging %d / %d", job.done, job.total) }
-	if job.phase == .Failed  { return fmt.ctprintf("%s", job.err) }
-	if !lib.scanned          { return "no library" }
-	if len(search.view) != len(lib.tracks) {
-		return fmt.ctprintf("%d of %d", len(search.view), len(lib.tracks))
-	}
-	return fmt.ctprintf("%d files", len(lib.tracks))
-}
-
 // The search box holds completed filters as chips and free text after them, so
 // a long query stays readable and any one filter can be dropped on its own.
 @(private)
@@ -934,7 +647,7 @@ draw_search :: proc(r: Rect) {
 	if remove_at >= 0 { remove_chip(remove_at) }
 
 	field := rect(x, r.y, r.x + r.width - x - px(8), r.height)
-	placeholder: cstring = len(search.chips) > 0 ? "" : "search, or type + to require a tag"
+	placeholder: cstring = len(search.chips) > 0 ? "" : "Search names, or describe it: \"explosion on black\"   (+tag requires a tag)"
 	if text_field(&app.query, field, placeholder) {
 		set_search_text(field_string(&app.query))
 		update_suggestions()
@@ -1093,16 +806,6 @@ draw_settings :: proc(r: Rect) {
 	section_label(x, y, "BROWSING")
 	y += px(20)
 
-	// Off by default. Searching a library is the usual way in; stepping through
-	// folders is for the times you know where the file lives.
-	if checkbox(x, y, "Step through folders", &browse.enabled) {
-		prefs.folder_view = browse.enabled
-		if !browse.enabled { set_browse_folder("") }
-		search.dirty = true
-		save_prefs()
-	}
-	y += px(24)
-
 	if checkbox(x, y, "Scrubbing is silent", &prefs.scrub_silent) {
 		save_prefs()
 	}
@@ -1176,248 +879,6 @@ draw_settings :: proc(r: Rect) {
 	}
 }
 
-// ── rail ────────────────────────────────────────────────────────────────────
-
-@(private)
-draw_rail :: proc(r: Rect) {
-	fill(r, PANEL)
-	begin_clip(r)
-	defer end_clip()
-
-	content_h := rail_content_height()
-	gutter := scroll_gutter(r, content_h)
-	scroll_area(&app.rail_scroll, r, content_h)
-
-	// Everything below is laid out inside `inner`, so nothing ends up beneath
-	// the scrollbar.
-	inner := rect(r.x, r.y, r.width - gutter, r.height)
-	y := inner.y + px(PAD) - app.rail_scroll.offset
-	x := inner.x + px(PAD)
-	inner_w := inner.width - px(PAD) * 2
-
-	section_label(x, y, "LIBRARIES")
-	add_lib := rect(inner.x + inner.width - px(30), y - px(6), px(22), px(22))
-	if icon_button(add_lib, .Plus) {
-		open_tag_editor(.Add_Library, "", "")
-		field_set(&app.editor_field, "")
-	}
-	y += px(20)
-
-	if len(libraries) == 0 {
-		draw_text(.Regular, "drop a folder here, or press +", x, y, FS_SMALL, TEXT_FAINT)
-		y += px(20)
-	}
-	for entry, i in libraries {
-		row := rect(inner.x + px(4), y, inner.width - px(8), px(24))
-		active := path_equal(lib.root, entry.path)
-		missing := !os.is_dir(entry.path)
-
-		if active { fill_round(row, ACCENT_DK, 4) }
-		else if hovered(row) { fill_round(row, PANEL_2, 4) }
-		if hovered(row) { ui.hover_cursor = .POINTING_HAND }
-
-		colour := active ? TEXT : TEXT_DIM
-		if missing { colour = BAD_C }
-		draw_text_mid(.Auto, elide_right(display_text(entry.name), inner_w - px(12), FS_BODY),
-		              row.x + px(10), row.y, row.height, FS_BODY, colour)
-
-		if clicked_in(row) {
-			field_set(&app.folder, entry.path)
-			open_library(i)
-		}
-		if right_clicked_in(row) { open_context_menu(&app.library_menu, i) }
-		y += px(24)
-	}
-
-	y += px(16)
-	section_label(x, y, "TAGS")
-
-	// Adding a tag is a rail action, not a menu item: this is where you are
-	// already looking when you notice the vocabulary is missing something.
-	add := rect(inner.x + inner.width - px(30), y - px(5), px(22), px(22))
-	if icon_button(add, .Plus) { open_context_menu(&app.tag_add_menu, 0) }
-	y += px(20)
-
-	if !lib.scanned {
-		draw_text(.Regular, "import a folder first", x, y, FS_SMALL, TEXT_FAINT)
-		return
-	}
-
-	// Somewhere to type. Forty games do not fit in a sidebar, and the tag you
-	// want is the one you can name.
-	{
-		box := rect(x, y, inner_w, px(26))
-		fill_round(box, PANEL_2, 5)
-		outline_round(box, ui.focus == rawptr(&app.tag_filter) ? ACCENT : LINE, 5)
-		draw_icon(.Search, rect(box.x + px(4), box.y, px(15), box.height), TEXT_FAINT)
-
-		if text_field(&app.tag_filter, box, "find a tag", px(24)) {
-			// Nothing to recompute: the groups read the filter as they draw.
-		}
-		if tag_filter_active() {
-			clear_box := rect(box.x + box.width - px(22), box.y + px(2), px(22), px(22))
-			if icon_button(clear_box, .Close) {
-				clear(&app.tag_filter.buf)
-				app.tag_filter.caret  = 0
-				app.tag_filter.anchor = 0
-			}
-		}
-		y += px(32)
-	}
-
-	// Only tags that exist in this library, plus anything the user has just
-	// created, so the rail stays a picture of what is actually here.
-	for &g, gi in tag_groups {
-		if gi >= len(app.group_open) { break }
-		if !group_in_scope(&g, search.kind) { continue }
-		tags := group_tags_present(&g)
-		if len(tags) == 0 { continue }
-
-		// A group with a match in it opens itself while the filter is on: the
-		// point of typing is to see the tag, not to be told which drawer it is
-		// in.
-		open := app.group_open[gi] || tag_filter_active()
-
-		head := rect(inner.x + px(4), y, inner.width - px(8), px(24))
-		if hovered(head) { ui.hover_cursor = .POINTING_HAND }
-		draw_icon(open ? .Caret_Down : .Caret_Right,
-		          rect(head.x + px(2), head.y, px(16), head.height), TEXT_FAINT)
-		draw_text_mid(.Bold, strings.clone_to_cstring(strings.to_upper(g.name, context.temp_allocator),
-		                                              context.temp_allocator),
-		              head.x + px(20), head.y, head.height, FS_LABEL,
-		              hovered(head) ? TEXT : TEXT_DIM)
-		count := fmt.ctprintf("%d", len(tags))
-		cw := text_w(.Regular, count, FS_SMALL)
-		draw_text_mid(.Regular, count, head.x + head.width - cw - px(8), head.y, head.height,
-		              FS_SMALL, TEXT_FAINT)
-		if clicked_in(head) { app.group_open[gi] = !app.group_open[gi] }
-		y += px(24)
-
-		if !open { continue }
-
-		for tag in tags {
-			n := lib.counts[tag]
-			row := rect(inner.x + px(4), y, inner.width - px(8), px(23))
-			filtering := chip_index(tag) >= 0
-			over := hovered(row)
-			if filtering { fill_round(row, ACCENT_DK, 4) }
-			else if over { fill_round(row, PANEL_2, 4) }
-
-			dot := rect(row.x + px(10), row.y + row.height * 0.5 - px(3), px(6), px(6))
-			fill_round(dot, tag_color_of(tag), px(3))
-
-			// Rename and remove appear on hover, so the rail stays quiet while
-			// it is being used to search rather than edited.
-			right := row.x + row.width - px(6)
-			if over {
-				trash := rect(right - px(20), row.y, px(20), row.height)
-				if icon_button(trash, .Trash) { open_tag_editor(.Confirm_Delete, tag, g.name) }
-				pencil := rect(trash.x - px(20), row.y, px(20), row.height)
-				if icon_button(pencil, .Pencil) { open_tag_editor(.Rename, tag, g.name) }
-				// The tag's own colour, as the button that changes it.
-				paint := rect(pencil.x - px(20), row.y + row.height * 0.5 - px(7), px(14), px(14))
-				fill_round(paint, tag_color_of(tag), px(7))
-				outline_round(paint, hovered(paint) ? TEXT : LINE, px(7))
-				if hovered(paint) { ui.hover_cursor = .POINTING_HAND }
-				if clicked_in(paint) { open_tag_editor(.Set_Color, tag, g.name) }
-				right = paint.x - px(4)
-			} else {
-				// A tag no file carries yet shows a dash rather than a zero: it
-				// is not a count of nothing, it is a tag waiting to be used.
-				count_label: cstring = n > 0 ? fmt.ctprintf("%d", n) : "–"
-				count_w := text_w(.Regular, count_label, FS_SMALL)
-				draw_text_mid(.Regular, count_label, right - count_w, row.y, row.height,
-				              FS_SMALL, TEXT_FAINT)
-				right -= count_w + px(4)
-			}
-
-			label_w := right - row.x - px(24)
-			label := tag
-			if g.kind == .Favorite {
-				switch tag {
-				case "⭐": label = "⭐ Star"
-				case "★": label = "★ Solid star"
-				case "🌟": label = "🌟 Glowing star"
-				case "☆": label = "☆ Outline star"
-				}
-			}
-			draw_text_mid(.Regular, elide_right(label, label_w, FS_SMALL),
-                row.x + px(22), row.y, row.height, FS_SMALL,
-                filtering ? TEXT : TEXT_DIM)
-
-			if rail_tag_click(row, tag) {
-				// A plain click *replaces* the query: browsing for a tag is
-				// nearly always a fresh question, and having to clear the last
-				// one first made the rail tedious. Ctrl adds to the query and
-				// Alt excludes, for building one up deliberately.
-				ctrl := rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)
-				alt  := rl.IsKeyDown(.LEFT_ALT) || rl.IsKeyDown(.RIGHT_ALT)
-
-				if idx := chip_index(tag); idx >= 0 && !alt {
-					remove_chip(idx)
-				} else if ctrl || alt {
-					add_chip(tag, alt ? .Exclude : .Require)
-				} else {
-					clear_search()
-					field_set(&app.query, "")
-					set_search_text("")
-					add_chip(tag)
-				}
-			}
-			if over { ui.hover_cursor = .POINTING_HAND }
-			y += px(23)
-		}
-		y += px(8)
-	}
-
-	// Tags found in sidecars that no group claims. They are searchable and
-	// countable like any other; they simply have no home in the vocabulary yet.
-	if loose := other_tags(); len(loose) > 0 {
-		section_label(x, y + px(4), "NOT IN THE TAG LIBRARY")
-		y += px(24)
-		for tag in loose {
-			row := rect(inner.x + px(4), y, inner.width - px(8), px(23))
-			filtering := chip_index(tag) >= 0
-			if filtering { fill_round(row, ACCENT_DK, 4) }
-			else if hovered(row) { fill_round(row, PANEL_2, 4); ui.hover_cursor = .POINTING_HAND }
-
-			count_label := fmt.ctprintf("%d", lib.counts[tag])
-			count_w := text_w(.Regular, count_label, FS_SMALL)
-			draw_text_mid(.Regular, elide_right(tag, row.width - px(30) - count_w, FS_SMALL),
-			              row.x + px(12), row.y, row.height, FS_SMALL,
-			              filtering ? TEXT : TEXT_FAINT)
-			draw_text_mid(.Regular, count_label, row.x + row.width - count_w - px(8),
-			              row.y, row.height, FS_SMALL, TEXT_FAINT)
-			if rail_tag_click(row, tag) {
-				if idx := chip_index(tag); idx >= 0 { remove_chip(idx) } else { add_chip(tag) }
-			}
-			y += px(23)
-		}
-	}
-}
-
-// A folder in the track list. Clicking it goes in.
-@(private)
-draw_folder_row :: proc(r: Rect, name: string, name_x: f32) {
-	over := hovered(r)
-	if over {
-		fill(r, PANEL_2)
-		ui.hover_cursor = .POINTING_HAND
-	}
-	hline(r.x, r.y + r.height - 1, r.width, LINE_SOFT)
-
-	draw_icon(.Folder, rect(name_x, r.y, px(18), r.height), ACCENT)
-	draw_text_mid(.Auto, elide_right(display_text(name), r.width * 0.5, FS_BODY),
-	              name_x + px(24), r.y, r.height, FS_BODY, TEXT)
-
-	count := fmt.ctprintf("%d", subfolder_count(name))
-	cw := text_w(.Regular, count, FS_SMALL)
-	draw_text_mid(.Regular, count, r.x + r.width - cw - px(24), r.y, r.height,
-	              FS_SMALL, TEXT_FAINT)
-
-	if clicked_in(r) { browse_into(name) }
-}
-
 // The tags of a group worth showing: those on at least one track, plus any the
 // user just added, so a new tag does not vanish the moment it is created.
 @(private)
@@ -1472,26 +933,6 @@ other_tags :: proc() -> []string {
 	}
 	slice.sort(out[:])
 	return out[:]
-}
-
-@(private)
-rail_content_height :: proc() -> f32 {
-	h := px(PAD) + px(20) + px(24) * f32(max(len(libraries), 1)) + px(16) + px(20)
-	if !lib.scanned { return h + px(30) }
-	h += px(32) // the filter box
-
-	for &g, gi in tag_groups {
-		if gi >= len(app.group_open) { break }
-		if !group_in_scope(&g, search.kind) { continue }
-		shown := len(group_tags_present(&g))
-		if shown == 0 { continue }
-		h += px(24) + px(8)
-		if app.group_open[gi] || tag_filter_active() { h += px(23) * f32(shown) }
-	}
-	if loose := len(other_tags()); loose > 0 {
-		h += px(24) + px(23) * f32(loose)
-	}
-	return h + px(PAD)
 }
 
 // ── the tag editor ──────────────────────────────────────────────────────────
@@ -2215,163 +1656,7 @@ guess_game_for_track_neighbours :: proc(index: int) -> (Game_Guess, bool) {
 	return guess_game_for_tracks(siblings[:])
 }
 
-// ── track list ──────────────────────────────────────────────────────────────
-
-@(private)
-draw_list :: proc(r: Rect) {
-	fill(r, BG)
-
-	if !lib.scanned {
-		draw_empty_state(r)
-		return
-	}
-
-	head := rect(r.x, r.y, r.width, px(HEAD_H))
-	fill(head, PANEL)
-	hline(head.x, head.y + head.height, head.width, LINE)
-
-	// Columns are worked out left to right and are allowed to disappear.
-	//
-	// The previous version gave the tag column a minimum width, which on a
-	// narrow list put its left edge behind the name's right edge: the name got
-	// a negative amount of room and drew straight over the header. A column
-	// that will not fit is dropped instead.
-	cols := list_columns(r)
-	name_x := cols.name_x
-	tags_x := cols.tags_x
-	time_x := cols.time_x
-	kind_x := cols.kind_x
-
-	draw_text_mid(.Bold, "NAME", name_x, head.y, head.height, FS_LABEL, TEXT_FAINT)
-	if cols.show_tags { draw_text_mid(.Bold, "TAGS", tags_x, head.y, head.height, FS_LABEL, TEXT_FAINT) }
-	if cols.show_time { draw_text_mid(.Bold, "TIME", time_x, head.y, head.height, FS_LABEL, TEXT_FAINT) }
-	if cols.show_kind { draw_text_mid(.Bold, "TYPE", kind_x, head.y, head.height, FS_LABEL, TEXT_FAINT) }
-
-	body := rect(r.x, head.y + head.height, r.width, r.height - head.height)
-	// Folders come first and share the scroll, so stepping into one is the
-	// same motion as picking a file.
-	folders := browsing_active() ? len(browse.subs) : 0
-	total_rows := folders + len(search.view)
-
-	if total_rows == 0 {
-		msg: cstring = browsing_active() ? "This folder is empty." : "Nothing matches this search."
-		draw_text(.Regular, msg, body.x + px(PAD), body.y + px(24), FS_BODY, TEXT_FAINT)
-		return
-	}
-
-	row_h := px(ROW_H)
-	content_h := row_h * f32(total_rows)
-	scroll_area(&app.list_scroll, body, content_h)
-
-	// Rows run the full width and the scrollbar is drawn over them at the end,
-	// so a selected row fills the panel it is in rather than stopping short of
-	// a strip on the right.
-	begin_clip(body)
-	defer end_clip()
-
-	// Only the rows on screen are drawn. This is the whole reason the list
-	// stays smooth at a few thousand files where the web version did not.
-	first := max(int(app.list_scroll.offset / row_h) - 1, 0)
-	last  := min(first + int(body.height / row_h) + 3, total_rows)
-
-	for fi in first ..< min(last, folders) {
-		y := body.y + row_h * f32(fi) - app.list_scroll.offset
-		draw_folder_row(rect(body.x, y, body.width, row_h), browse.subs[fi], name_x)
-	}
-
-	for vi in max(first, folders) ..< last {
-		index := search.view[vi - folders]
-		t := &lib.tracks[index]
-		y := body.y + row_h * f32(vi) - app.list_scroll.offset
-		row := rect(body.x, y, body.width, row_h)
-		tag_drop_target(row, index)
-
-		selected := app.selected == index || slice.contains(app.selection[:], index)
-		over := hovered(row)
-		if selected {
-			fill(row, over ? ACCENT_SF : ACCENT_DK)
-			fill(rect(row.x, row.y, px(2), row.height), ACCENT)
-		} else if over {
-			fill(row, PANEL_2)
-		}
-		hline(row.x, row.y + row.height - 1, row.width, LINE_SOFT)
-		if over { ui.hover_cursor = .POINTING_HAND }
-
-		// A dot carries the track's state: untouched, edited, saved.
-		dot := rect(name_x, row.y + row.height * 0.5 - px(3), px(6), px(6))
-		dot_col := TEXT_FAINT
-		if t.saved      { dot_col = ACCENT }
-		else if t.dirty { dot_col = WARN_C }
-		else if len(t.tags) > 0 { dot_col = GOOD_C }
-		fill_round(dot, dot_col, px(3))
-
-		// Clipped to its own column as well as elided. Eliding depends on
-		// measuring the same font that draws; the clip is what guarantees a
-		// name can never reach the tags, whatever the measurement says.
-		name_x2 := name_x + px(16)
-		name_w := max(cols.name_end - name_x2, 0)
-		if name_w > px(20) {
-			begin_clip(rect(name_x2, row.y, name_w, row.height))
-			label := elide_left(display_text(t.rel), name_w, FS_BODY)
-			draw_text_mid(.Auto, label, name_x2, row.y, row.height, FS_BODY,
-			              selected ? TEXT : rl.Color{219, 224, 233, 255})
-			end_clip()
-		}
-
-		if cols.show_tags { draw_row_tags(t, tags_x, row.y, cols.tags_w, row.height) }
-
-		if cols.show_time && t.duration > 0 {
-			time_label := fmt.ctprintf("%s", fmt_time(t.duration))
-			draw_text_mid(.Regular, time_label, time_x, row.y, row.height, FS_SMALL, TEXT_FAINT)
-		}
-		if cols.show_kind {
-			kind_label: cstring = t.is_sfx ? "SFX" : fmt.ctprintf("%s", strings.to_upper(t.ext[1:], context.temp_allocator))
-			draw_text_mid(.Regular, kind_label, kind_x, row.y, row.height, FS_SMALL, TEXT_FAINT)
-		}
-
-		if right_clicked_in(row) {
-			// Right-clicking outside the selection makes that row the subject;
-			// inside it, the whole selection stays the subject.
-			if !slice.contains(app.selection[:], index) {
-				clear(&app.selection)
-				app.selected = index
-			}
-			open_context_menu(&app.track_menu, index)
-		}
-		if clicked_in(row) {
-			shift := rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
-			ctrl  := rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)
-
-			if shift && app.anchor >= 0 {
-				select_range(app.anchor, vi - folders)
-			} else if ctrl {
-				toggle_in_selection(index)
-				app.anchor = vi - folders
-			} else {
-				clear(&app.selection)
-				app.anchor = vi - folders
-				// A plain click auditions. Building a selection deliberately
-				// does not, or picking twenty files would restart playback
-				// twenty times.
-				play_track(index)
-			}
-			app.selected = index
-			if app.inspector_auto { app.inspector = true }
-
-			// A press is not yet a drag. It becomes one only once the pointer
-			// has actually moved, so a plain click still selects.
-			app.press_index = index
-			app.press_pos   = ui.mouse
-			app.press_armed = true
-		}
-	}
-
-	// Right-click anywhere on a row opens the track menu, on that row.
-	maybe_start_drag()
-
-	// Last, so it sits on top of the rows rather than beside them.
-	scroll_bar_over(&app.list_scroll, body, content_h)
-}
+// ── dragging ────────────────────────────────────────────────────────────────
 
 // Turns a press that has travelled far enough into a file drag.
 //
@@ -2505,219 +1790,6 @@ draw_empty_state :: proc(r: Rect) {
 
 // ── inspector ───────────────────────────────────────────────────────────────
 
-@(private)
-draw_inspector :: proc(r: Rect) {
-	fill(r, PANEL)
-	if app.selected < 0 || app.selected >= len(lib.tracks) { return }
-	t := &lib.tracks[app.selected]
-	tag_drop_target(r, app.selected)
-
-	begin_clip(r)
-	defer end_clip()
-
-	content_h := inspector_content_height(t)
-	gutter := scroll_gutter(r, content_h)
-	scroll_area(&app.insp_scroll, r, content_h)
-
-	x := r.x + px(PAD + 2)
-	w := r.width - gutter - px((PAD + 2) * 2)
-	y := r.y + px(PAD) - app.insp_scroll.offset
-
-	// Name and location.
-	draw_text(.Auto, elide_right(display_text(t.name), w - px(30), FS_TITLE), x, y, FS_TITLE, TEXT)
-	close := rect(x + w - px(22), y - px(2), px(22), px(22))
-	if icon_button(close, .Close) {
-		app.inspector      = false
-		app.inspector_auto = false
-		prefs.inspector_auto = false
-		save_prefs()
-		toast("panel closed — Tab reopens it")
-	}
-	y += px(22)
-
-	draw_text(.Auto, elide_left(display_text(t.rel), w, FS_SMALL), x, y, FS_SMALL, TEXT_FAINT)
-	y += px(20)
-
-	meta := fmt.ctprintf("%s  ·  %s  ·  %.1f MB",
-	                     strings.to_upper(t.ext[1:], context.temp_allocator),
-	                     fmt_time(t.duration), f64(t.size) / (1024 * 1024))
-	if t.kind != .Audio {
-		// No duration is known for a picture, and a 0:00 reads as broken.
-		meta = fmt.ctprintf("%s  ·  %s  ·  %.1f MB", kind_label(t),
-		                    strings.to_upper(t.ext[1:], context.temp_allocator), f64(t.size) / (1024 * 1024))
-	}
-	draw_text(.Regular, meta, x, y, FS_SMALL, TEXT_DIM)
-	y += px(24)
-
-	if t.kind != .Audio { y = draw_inspector_preview(t, app.selected, x, y, w) }
-
-	hline(x, y, w)
-	y += px(14)
-
-	if t.kind == .Audio { y = draw_marker_controls(t, x, y, w) }
-	// Tags on the file. Clicking one removes it.
-	section_label(x, y, "TAGS ON THIS FILE")
-	y += px(18)
-	if len(t.tags) == 0 {
-		draw_text(.Regular, "none yet", x, y, FS_SMALL, TEXT_FAINT)
-		y += px(20)
-	} else {
-		cx := x
-		remove: string
-		for tag, i in t.tags {
-			label := strings.clone_to_cstring(tag, context.temp_allocator)
-			width := text_w(.Regular, label, FS_SMALL) + px(14) + px(14)
-			if cx + width > x + w { cx = x; y += px(24) }
-			kind := i < len(t.kinds) ? t.kinds[i] : tag_kind(tag)
-			cw, _, removed := chip(cx, y, label, tag_color_of(tag), true,
-			                       kind == .Favorite ? .Star : .None)
-			if removed { remove = tag }
-			cx += cw + px(4)
-		}
-		if remove != "" { remove_tag_from_track(t, remove) }
-		y += px(28)
-	}
-
-	// The game. Kept apart from the palette because there are forty of them and
-	// a track has exactly one, so a wall of buttons is the wrong shape. Music
-	// only: the guess reads soundtrack folder names, and says nonsense about a
-	// folder of stock footage.
-	if t.kind == .Audio && !t.is_sfx {
-		section_label(x, y, "GAME")
-		y += px(20)
-
-		current := ""
-		for tag in t.tags {
-			if tag_kind(tag) == .Game { current = tag; break }
-		}
-
-		if current != "" {
-			cw, _, removed := chip(x, y, strings.clone_to_cstring(current, context.temp_allocator),
-			                       tag_color_of(current), true)
-			if removed { remove_tag_from_track(t, current) }
-			if button(rect(x + cw + px(8), y - px(1), px(70), px(22)), "Change", .Ghost) {
-				open_tag_editor(.Set_Game, current, "Game")
-			}
-			y += px(30)
-		} else {
-			bw := px(120)
-			if button(rect(x, y, bw, px(24)), "Set game", .Normal) {
-				open_tag_editor(.Set_Game, "", "Game")
-			}
-			// What the folder and the neighbouring filenames say it is.
-			if guess, found := guess_game_for_track_neighbours(app.selected); found {
-				label := fmt.ctprintf("%s?", guess.tag)
-				gw := text_w(.Regular, label, FS_SMALL) + px(26)
-				b := rect(x + bw + px(8), y, gw, px(24))
-				if hovered(b) { fill_round(b, PANEL_3, 4); ui.hover_cursor = .POINTING_HAND }
-				outline_round(b, GAME_C, 4)
-				draw_icon(.Plus, rect(b.x + px(4), b.y, px(13), b.height), GAME_C)
-				draw_text_mid(.Regular, label, b.x + px(19), b.y, b.height, FS_SMALL, GAME_C)
-				if clicked_in(b) { add_tag_to_track(t, guess.tag) }
-			}
-			y += px(32)
-		}
-	}
-
-	// The quick vocabulary. For an effect the palette is numbered, because the
-	// number keys drive it.
-	if len(app.selection) > 1 {
-		section_label(x, y, fmt.ctprintf("APPLY TO %d SELECTED", len(app.selection)))
-	} else {
-		section_label(x, y, t.is_sfx ? "CATEGORY  (press the number)" : "ADD A TAG")
-	}
-	y += px(20)
-	y = draw_tag_palette(t, x, y, w)
-	y += px(8)
-
-	if t.is_sfx {
-		guesses: [dynamic]string
-		guesses.allocator = context.temp_allocator
-		suggest_track_sfx_tags(t, &guesses)
-
-		missing := make([dynamic]string, 0, 4, context.temp_allocator)
-		for g in guesses {
-			if !slice.contains(t.tags[:], g) { append(&missing, g) }
-		}
-		if len(missing) > 0 {
-			draw_text(.Regular, "The filename suggests:", x, y, FS_SMALL, TEXT_FAINT)
-			y += px(20)
-			cx := x
-			for g in missing {
-				label := strings.clone_to_cstring(g, context.temp_allocator)
-				bw := text_w(.Regular, label, FS_SMALL) + px(26)
-				if cx + bw > x + w { cx = x; y += px(26) }
-				b := rect(cx, y, bw, px(22))
-				if hovered(b) { fill_round(b, PANEL_3, 4); ui.hover_cursor = .POINTING_HAND }
-				outline_round(b, SFX_C, 4)
-				draw_icon(.Plus, rect(cx + px(4), b.y, px(14), b.height), SFX_C)
-				draw_text_mid(.Regular, label, cx + px(19), b.y, b.height, FS_SMALL, SFX_C)
-				if clicked_in(b) { add_tag_to_track(t, g) }
-				cx += bw + px(5)
-			}
-			y += px(30)
-		}
-	}
-	y += px(4)
-
-	hline(x, y, w)
-	y += px(14)
-
-	// What the model thought.
-	section_label(x, y, "MODEL")
-	y += px(18)
-
-	if t.is_sfx && !t.scored {
-		draw_text(.Regular, "Effects use an AudioSet tagger, not the music model.",
-		          x, y, FS_SMALL, TEXT_FAINT)
-		y += px(18)
-		draw_text(.Regular, "It hears what a sound is. What it is for comes from",
-		          x, y, FS_SMALL, TEXT_FAINT)
-		y += px(15)
-		draw_text(.Regular, "the filename, or from you.", x, y, FS_SMALL, TEXT_FAINT)
-		y += px(24)
-
-		busy := job.phase == .Loading || job.phase == .Running
-		if button(rect(x, y, w, px(30)), "Analyze this effect", .Normal, !busy) {
-			start_analyze({app.selected})
-		}
-		y += px(36)
-		if button(rect(x, y, w, px(28)), "Guess every effect in view from filenames", .Ghost) {
-			apply_filename_guess()
-		}
-		y += px(36)
-	} else if !t.scored {
-		msg: cstring = job.phase == .Running ? "tagging in progress…" : "not analyzed yet"
-		draw_text(.Regular, msg, x, y, FS_SMALL, TEXT_FAINT)
-		y += px(24)
-		b := rect(x, y, px(150), px(28))
-		busy := job.phase == .Loading || job.phase == .Running
-		if button(b, t.kind == .Audio ? "Analyze this track" : "Analyze this file", .Normal, !busy && lib.scanned) {
-			start_analyze({app.selected})
-		}
-		y += px(36)
-	} else {
-		y = draw_scores(t, x, y, w)
-	}
-
-	// Saving.
-	if t.dirty {
-		hline(x, y, w)
-		y += px(12)
-		b := rect(x, y, w, px(30))
-		if button(b, "Save to sidecar", .Primary) {
-			if e := save_track(app.selected); e != "" {
-				toast(e)
-			} else {
-				toast("sidecar written")
-			}
-		}
-	} else if t.saved {
-		draw_icon(.Check, rect(x, y, px(14), px(14)), GOOD_C)
-		draw_text(.Regular, "saved", x + px(18), y, FS_SMALL, GOOD_C)
-	}
-}
-
 // A compact grid of the mood and sound vocabulary. The tags already on the
 // track read as filled; clicking toggles. This is the whole tagging workflow,
 // on the same screen as the list.
@@ -2840,35 +1912,6 @@ draw_scores :: proc(t: ^Track, x, y, w: f32) -> f32 {
 		cy += px(20)
 	}
 	return cy + px(8)
-}
-
-@(private)
-inspector_content_height :: proc(t: ^Track) -> f32 {
-	w := max(px(40), px(app.inspect_w) - px((PAD + 2) * 2) - px(16))
-	h := px(290) + px(28) * f32(len(t.cues))
-	cx: f32
-	for tag in t.tags {
-		bw := text_w(.Regular, strings.clone_to_cstring(tag, context.temp_allocator), FS_SMALL) + px(28)
-		if cx + bw > w { h += px(24); cx = 0 }
-		cx += bw + px(4)
-	}
-	wanted := scope_for_track(t)
-	for &g in tag_groups {
-		if g.scope != wanted && g.scope != .Both { continue }
-		cx = 0
-		for tag in g.tags {
-			slot := t.is_sfx ? quick_slot(tag) : -1
-			bw := text_w(.Regular, strings.clone_to_cstring(tag, context.temp_allocator), FS_SMALL) + px(16) + (slot >= 0 ? px(15) : 0)
-			if cx + bw > w { h += px(24); cx = 0 }
-			cx += bw + px(4)
-		}
-		h += px(28)
-	}
-	n_scores := t.kind == .Audio ? len(t.scores) : min(len(t.scores), MEDIA_SCORES_SHOWN)
-	h += t.scored ? px(20) * f32(n_scores) : px(120)
-	if t.is_sfx { h += px(560) }
-	if t.kind != .Audio { h += inspector_preview_height(t, w) }
-	return h + px(120)
 }
 
 // ── player dock ─────────────────────────────────────────────────────────────
@@ -3038,7 +2081,9 @@ draw_dock :: proc(r: Rect) {
 		rx = mb.x - px(8)
 	}
 
-	draw_waveform(rect(r.x + px(PAD), r.y + px(42), r.width - px(PAD) * 2, r.height - px(52)))
+	if r.height >= px(DOCK_COMPACT_H) + px(30) {
+		draw_waveform(rect(r.x + px(PAD), r.y + px(42), r.width - px(PAD) * 2, r.height - px(52)))
+	}
 }
 
 @(private)
@@ -3055,24 +2100,6 @@ step_track :: proc(delta: int) {
 	app.selected = search.view[next]
 	play_track(app.selected)
 	scroll_selection_into_view()
-}
-
-@(private)
-scroll_selection_into_view :: proc() {
-	for index, vi in search.view {
-		if index != app.selected { continue }
-		row_h := px(ROW_H)
-		top := row_h * f32(vi)
-		view_h := f32(rl.GetScreenHeight()) - px(TITLEBAR_H) -
-		          px(TOPBAR_H) * f32(topbar_rows(f32(rl.GetScreenWidth()))) -
-		          px(app.dock_h) - px(HEAD_H)
-		if top < app.list_scroll.offset {
-			app.list_scroll.offset = top
-		} else if top + row_h > app.list_scroll.offset + view_h {
-			app.list_scroll.offset = top + row_h - view_h
-		}
-		return
-	}
 }
 
 // ── keyboard ────────────────────────────────────────────────────────────────
@@ -3141,6 +2168,12 @@ handle_keys :: proc() {
 			app.tag_add_menu.open = false
 		} else if app.sort_menu.open {
 			app.sort_menu.open = false
+		} else if app.toolbar_menu.open {
+			app.toolbar_menu.open = false
+		} else if app.folder_menu.open {
+			app.folder_menu.open = false
+		} else if viewer.open {
+			close_viewer()
 		} else if app.tag_editor {
 			close_tag_editor()
 		} else if app.settings_open {
@@ -3198,8 +2231,23 @@ handle_keys :: proc() {
 		}
 	}
 
-	if key_repeat(.DOWN) { step_track(1) }
-	if key_repeat(.UP)   { step_track(-1) }
+	// The big viewer has the arrows while it is open: they step through the
+	// files, and the rest of the keys belong to it.
+	if viewer.open {
+		if key_repeat(.RIGHT) || key_repeat(.DOWN) { viewer_step(1) }
+		if key_repeat(.LEFT)  || key_repeat(.UP)   { viewer_step(-1) }
+		if rl.IsKeyPressed(.SPACE) { toggle_play() }
+		return
+	}
+
+	tiles := app.view == .Browse && !browser_is_list()
+	if key_repeat(.DOWN) { step_track(tiles ? browser_row_step() : 1) }
+	if key_repeat(.UP)   { step_track(tiles ? -browser_row_step() : -1) }
+	if tiles {
+		if key_repeat(.RIGHT) { step_track(1) }
+		if key_repeat(.LEFT)  { step_track(-1) }
+	}
+	if rl.IsKeyPressed(.BACKSPACE) && app.view == .Browse { browse_up() }
 	if rl.IsKeyPressed(.SPACE) { toggle_play() }
 	if rl.IsKeyPressed(.ENTER) && app.selected >= 0 {
 		if e := save_track(app.selected); e != "" { toast(e) } else { toast("sidecar written") }
@@ -3212,14 +2260,21 @@ handle_keys :: proc() {
 		save_prefs()
 	}
 	if rl.IsKeyPressed(.M) {
-		if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) { set_view(app.view == .Map ? .List : .Map) } else { add_playhead_marker() }
+		if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) { set_view(app.view == .Map ? .Browse : .Map) } else { add_playhead_marker() }
 	}
-	if rl.IsKeyPressed(.V) { set_view(app.view == .Grid ? .List : .Grid) }
-	if rl.IsKeyPressed(.T) { set_view(app.view == .Tag ? .List : .Tag) }
+	// V flips between the list and tiles, keeping the tile size last used.
+	if rl.IsKeyPressed(.V) {
+		set_view(.Browse)
+		if browser_is_list() { set_zoom(max(prefs.zoom, ZOOM_LIST_END + 0.2)) } else { set_zoom(0) }
+	}
+	if rl.IsKeyPressed(.B) { set_view(.Browse) }
+	if rl.IsKeyPressed(.T) { set_view(app.view == .Tag ? .Browse : .Tag) }
 	if rl.IsKeyPressed(.G)   { apply_filename_guess() }
 	if rl.IsKeyPressed(.F)   && app.view == .Map { nodes.built = false }
-	if rl.IsKeyPressed(.LEFT)  { seek_to(player_position() - 5) }
-	if rl.IsKeyPressed(.RIGHT) { seek_to(player_position() + 5) }
+	if !tiles {
+		if rl.IsKeyPressed(.LEFT)  { seek_to(player_position() - 5) }
+		if rl.IsKeyPressed(.RIGHT) { seek_to(player_position() + 5) }
+	}
 }
 
 // ── actions ─────────────────────────────────────────────────────────────────
@@ -3286,75 +2341,6 @@ start_analysis_split :: proc(candidates: []int) {
 		toast(fmt.tprintf("analysing %d %s — run again for the other %d files",
 		                  len(groups[largest].list), groups[largest].name, rest))
 	}
-}
-
-// ── the breadcrumb ──────────────────────────────────────────────────────────
-
-// Where you are, and the way back.
-@(private)
-draw_breadcrumb :: proc(r: Rect) {
-	fill(r, PANEL)
-	x := r.x + px(PAD)
-
-	// Up, which is the button reached for most.
-	up := rect(x, r.y + (r.height - px(22)) * 0.5, px(24), px(22))
-	if browse.folder != "" {
-		if icon_button(up, .Caret_Up) { browse_up() }
-	} else {
-		draw_icon(.Caret_Up, up, rl.Color{60, 68, 80, 255})
-	}
-	x += px(30)
-
-	root := path_leaf(lib.root)
-	if button(rect(x, r.y + (r.height - px(22)) * 0.5,
-	               text_w(.Regular, strings.clone_to_cstring(root, context.temp_allocator), FS_SMALL) + px(16),
-	               px(22)),
-	          strings.clone_to_cstring(root, context.temp_allocator), .Ghost) {
-		set_browse_folder("")
-	}
-	x += text_w(.Regular, strings.clone_to_cstring(root, context.temp_allocator), FS_SMALL) + px(18)
-
-	parts := breadcrumb()
-	for part, i in parts {
-		draw_text_mid(.Regular, "/", x, r.y, r.height, FS_SMALL, TEXT_FAINT)
-		x += px(10)
-
-		label := strings.clone_to_cstring(display_text(part), context.temp_allocator)
-		w := text_w(.Regular, label, FS_SMALL) + px(16)
-		last := i == len(parts) - 1
-		b := rect(x, r.y + (r.height - px(22)) * 0.5, w, px(22))
-		if last {
-			draw_text_mid(.Auto, label, b.x + px(8), b.y, b.height, FS_SMALL, TEXT)
-		} else if button(b, label, .Ghost) {
-			set_browse_folder(breadcrumb_path(i + 1, context.allocator))
-		}
-		x += w + px(2)
-	}
-
-	rx := r.x + r.width - px(PAD)
-
-	if !browsing_active() {
-		msg: cstring = "searching the whole library"
-		mw := text_w(.Regular, msg, FS_SMALL)
-		draw_text_mid(.Regular, msg, rx - mw, r.y, r.height, FS_SMALL, TEXT_FAINT)
-		return
-	}
-
-	// Everything underneath, or only this level. Everything is the default:
-	// the top of a library where every file lives in a subfolder would
-	// otherwise show nothing at all.
-	label: cstring = browse.recursive ? "including subfolders" : "this folder only"
-	bw := text_w(.Regular, label, FS_SMALL) + px(18)
-	b := rect(rx - bw, r.y + (r.height - px(22)) * 0.5, bw, px(22))
-	if button(b, label, browse.recursive ? .Normal : .Ghost) {
-		browse.recursive = !browse.recursive
-		search.dirty = true
-	}
-	rx = b.x - px(10)
-
-	msg := fmt.ctprintf("%d folders · %d files", len(browse.subs), len(search.view))
-	mw := text_w(.Regular, msg, FS_SMALL)
-	draw_text_mid(.Regular, msg, rx - mw, r.y, r.height, FS_SMALL, TEXT_FAINT)
 }
 
 // ── the track menu ──────────────────────────────────────────────────────────
@@ -3558,70 +2544,17 @@ draw_scope_choice :: proc(x, y, w: f32) -> f32 {
 	return cy + px(36)
 }
 
-// ── list columns ────────────────────────────────────────────────────────────
 
-// Where the track list's columns sit, given the width it has.
-//
-// Worked out left to right, and every column past the name is optional. The
-// name is what a list is for, so it keeps whatever is left and the rest give
-// way as the panel narrows.
-List_Columns :: struct {
-	name_x:    f32,
-	name_end:  f32, // where the name must stop
-	tags_x:    f32,
-	tags_w:    f32,
-	time_x:    f32,
-	kind_x:    f32,
-	show_tags: bool,
-	show_time: bool,
-	show_kind: bool,
-}
-
-list_columns :: proc(r: Rect) -> List_Columns {
-	MIN_NAME  :: 150.0
-	TIME_W    :: 56.0
-	KIND_W    :: 46.0
-	MIN_TAGS  :: 90.0
-
-	c: List_Columns
-	c.name_x = r.x + px(PAD)
-	right := r.x + r.width - px(PAD)
-	// Room for the scrollbar, which lives just inside the right edge.
-	right -= px(14)
-
-	available := right - c.name_x
-	if available < px(MIN_NAME) {
-		// Nothing but the name, and even that is squeezed.
-		c.name_end = right
-		return c
+// F12: the window as a picture, in logs/, for showing what went wrong.
+save_screenshot :: proc() {
+	@(static) n: int
+	n += 1
+	dir := join_path({project_root(), "logs"})
+	os.make_directory(dir)
+	path := join_path({dir, fmt.tprintf("screenshot-%d.png", n)})
+	image := rl.LoadImageFromScreen()
+	defer rl.UnloadImage(image)
+	if rl.ExportImage(image, strings.clone_to_cstring(path, context.temp_allocator)) {
+		toast(fmt.tprintf("screenshot saved: logs/screenshot-%d.png", n))
 	}
-
-	// The narrow columns go first, in order of how little they cost.
-	if available - px(KIND_W) >= px(MIN_NAME) {
-		c.show_kind = true
-		right -= px(KIND_W)
-		c.kind_x = right
-		available = right - c.name_x
-	}
-	if available - px(TIME_W) >= px(MIN_NAME) {
-		c.show_time = true
-		right -= px(TIME_W)
-		c.time_x = right
-		available = right - c.name_x
-	}
-
-	// Tags take a share of what is left, never more than would starve the name.
-	want := (right - c.name_x) * 0.42
-	room := right - c.name_x - px(MIN_NAME)
-	c.tags_w = clamp(want, 0, max(room, 0))
-	if c.tags_w >= px(MIN_TAGS) {
-		c.show_tags = true
-		right -= c.tags_w
-		c.tags_x = right
-	} else {
-		c.tags_w = 0
-	}
-
-	c.name_end = right - px(10)
-	return c
 }

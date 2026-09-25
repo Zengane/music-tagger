@@ -27,11 +27,12 @@ if pgrep -x MusicTagger >/dev/null 2>&1; then
 fi
 
 echo "Building MusicTagger..."
-"$ODIN" build ui -out:MusicTagger -o:speed
+BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+"$ODIN" build ui -out:MusicTagger -o:speed -define:BUILD_ID="$BUILD_ID"
 
 # The same program again, for the self test and the other check modes.
 echo "Building mtag-test..."
-"$ODIN" build ui -out:mtag-test -o:speed
+"$ODIN" build ui -out:mtag-test -o:speed -define:BUILD_ID="$BUILD_ID"
 
 echo
 echo "Ready: $(pwd)/MusicTagger"

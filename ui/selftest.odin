@@ -33,6 +33,10 @@ check :: proc(name: string, ok: bool, detail := "") {
 
 run_selftest :: proc(folder: string, with_model := false) -> int {
 	fmt.println("music tagger — self test")
+	fmt.printf("build %s\n", build_label())
+	// The checks below ask about the whole library at once, which is the flat
+	// view. The browsing checks turn folders on and off themselves.
+	prefs.show_folders = false
 
 	test_sfx_semantic_layout()
 	test_second_pass()
@@ -2317,11 +2321,17 @@ test_list_columns :: proc() {
 			if c.tags_x < last { overlapping += 1 }
 			last = c.tags_x + c.tags_w
 		}
-		if c.show_time {
-			if c.time_x < last { overlapping += 1 }
-			last = c.time_x
+		// Right-hand columns, left to right: type, length, size, modified.
+		cols := [4]struct{ show: bool, x, w: f32 }{
+			{c.show_type, c.type_x, c.type_w}, {c.show_len, c.len_x, c.len_w},
+			{c.show_size, c.size_x, c.size_w}, {c.show_date, c.date_x, c.date_w},
 		}
-		if c.show_kind && c.kind_x < last { overlapping += 1 }
+		for col in cols {
+			if !col.show { continue }
+			if col.x < last { overlapping += 1 }
+			last = col.x + col.w
+		}
+		if last > r.x + r.width { overlapping += 1 }
 	}
 
 	check("the name column is never negative", inverted == 0,
@@ -2334,10 +2344,10 @@ test_list_columns :: proc() {
 	// nothing, which is what keeps the name readable.
 	narrow := list_columns(rect(0, 0, 260, 600))
 	check("a narrow list drops its columns",
-	      !narrow.show_tags && !narrow.show_time && !narrow.show_kind)
+	      !narrow.show_tags && !narrow.show_len && !narrow.show_type && !narrow.show_size && !narrow.show_date)
 	wide := list_columns(rect(0, 0, 1400, 600))
 	check("a wide list shows them all",
-	      wide.show_tags && wide.show_time && wide.show_kind)
+	      wide.show_tags && wide.show_len && wide.show_type && wide.show_size && wide.show_date)
 }
 
 // ── measured shape ──────────────────────────────────────────────────────────
@@ -2520,35 +2530,50 @@ test_range_xml :: proc() {
 
 // ── browsing ────────────────────────────────────────────────────────────────
 
-// Browsing must never hide the library.
-//
-// The first version showed only files sitting *directly* in the current
-// folder, which is how a file manager behaves and was wrong here: this library
-// keeps every track in a subfolder, so the top level was empty and nothing
-// appeared at all until a tag was clicked.
+// Folders: with them shown, the browser is a file manager; flat, it is the
+// whole library. Either way nothing is lost, and the counts agree.
 @(private="file")
 test_browsing :: proc() {
 	fmt.println("\nbrowsing")
 
-	browse.enabled = true
-	browse.recursive = true
+	saved := prefs.show_folders
+	defer prefs.show_folders = saved
+	invalidate_folder_tree()
+
+	// Flat: the top of the tree is the whole library.
+	prefs.show_folders = false
 	set_browse_folder("")
 	clear_search()
 	set_search_text("")
 	set_kind_filter(.All)
 	rebuild_view()
-
-	check("the top of the tree shows the whole library",
+	check("flat, the top of the tree shows the whole library",
 	      len(search.view) == len(lib.tracks),
 	      fmt.tprintf("%d of %d", len(search.view), len(lib.tracks)))
-	check("the top offers folders to step into", len(browse.subs) > 0,
-	      fmt.tprintf("%d folders", len(browse.subs)))
+	check("the tree counts every file", folder_tree.nodes[0].counts[.All] == len(lib.tracks),
+	      fmt.tprintf("%d counted", folder_tree.nodes[0].counts[.All]))
 
-	// Stepping in narrows, and never to nothing when the folder has contents.
+	// Folders shown: the top offers folders, and files at the top only.
+	prefs.show_folders = true
+	rebuild_view()
+	check("with folders shown, the top offers folders to step into", len(browse.subs) > 0,
+	      fmt.tprintf("%d folders", len(browse.subs)))
+	top_files := 0
+	for &t in lib.tracks { if parent_folder(t.rel) == "" { top_files += 1 } }
+	check("and only the files that sit at the top", len(search.view) == top_files,
+	      fmt.tprintf("%d shown, %d at the top", len(search.view), top_files))
+	in_subs := 0
+	for name in browse.subs { in_subs += subfolder_count(name) }
+	check("folders and files at the top add up to the library", in_subs + top_files == len(lib.tracks),
+	      fmt.tprintf("%d + %d of %d", in_subs, top_files, len(lib.tracks)))
+
 	if len(browse.subs) > 0 {
-		first := browse.subs[0]
+		first := strings.clone(browse.subs[0], context.temp_allocator)
 		expected := subfolder_count(first)
 		browse_into(first)
+
+		// Flat inside a folder: everything under it.
+		prefs.show_folders = false
 		rebuild_view()
 		fmt.printf("        %s holds %d\n", first, len(search.view))
 		check("stepping into a folder shows what is under it",
@@ -2556,29 +2581,44 @@ test_browsing :: proc() {
 		      fmt.tprintf("%d shown, %d counted", len(search.view), expected))
 		check("it is fewer than the whole library", len(search.view) < len(lib.tracks))
 
-		// This folder only: never more than the recursive answer.
-		browse.recursive = false
+		// Folders shown: never more than everything under it.
+		prefs.show_folders = true
 		rebuild_view()
-		shallow := len(search.view)
-		check("this-folder-only shows no more than everything under it",
-		      shallow <= expected, fmt.tprintf("%d vs %d", shallow, expected))
-		browse.recursive = true
+		check("this folder's own files are no more than everything under it",
+		      len(search.view) <= expected, fmt.tprintf("%d vs %d", len(search.view), expected))
+
+		// A search looks everywhere under the folder, and hides folder items.
+		set_search_text("a")
+		rebuild_view()
+		check("a search lists files, not folders", !browsing_active())
+		all_under := true
+		for index in search.view {
+			dir := parent_folder(lib.tracks[index].rel)
+			if len(dir) < len(first) || !path_equal(dir[:len(first)], first) { all_under = false }
+		}
+		check("a search inside a folder stays inside it", all_under)
+		set_search_text("")
 
 		browse_up()
+		prefs.show_folders = false
 		rebuild_view()
 		check("going up returns to the whole library",
 		      len(search.view) == len(lib.tracks),
 		      fmt.tprintf("%d of %d", len(search.view), len(lib.tracks)))
 	}
 
-	// A search ignores the folder entirely.
-	if len(browse.subs) > 0 { browse_into(browse.subs[0]) }
-	set_search_text("a")
-	rebuild_view()
-	check("a search looks at the whole library, not the folder",
-	      !browsing_active())
-	set_search_text("")
+	// Every section's count matches what choosing it shows.
+	prefs.show_folders = false
 	set_browse_folder("")
+	mismatched := 0
+	for k in Kind_Filter {
+		set_kind_filter(k)
+		rebuild_view()
+		if len(search.view) != folder_tree.nodes[0].counts[k] { mismatched += 1 }
+	}
+	check("each section shows as many files as the sidebar says", mismatched == 0,
+	      fmt.tprintf("%d sections disagree", mismatched))
+	set_kind_filter(.All)
 	rebuild_view()
 }
 

@@ -397,6 +397,10 @@ draw_titlebar :: proc(r: Rect) {
 
 	draw_text_mid(.Bold, "Music Tagger", mark.x + mark.width + px(9), r.y, r.height,
 	              FS_BODY, TEXT_DIM)
+	// Which build, faintly: the quickest way to tell a new .exe from an old one.
+	name_w := text_w(.Bold, "Music Tagger", FS_BODY)
+	draw_text_mid(.Regular, fmt.ctprintf("build %s", build_label()), mark.x + mark.width + px(9) + name_w + px(10),
+	              r.y, r.height, FS_SMALL, TEXT_FAINT)
 
 	// The buttons.
 	//

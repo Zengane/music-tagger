@@ -579,6 +579,9 @@ playable_path :: proc(t: ^Track) -> (path: string, ext: string, ok: bool) {
 play_track :: proc(track_index: int) {
 	marker_drag = -1
 	if track_index < 0 || track_index >= len(lib.tracks) { return }
+	// A picture, a model or a document has nothing to play, and looking at one
+	// should not stop the music that is playing.
+	if k := lib.tracks[track_index].kind; k == .Image || k == .Model || k == .Document { return }
 	unload_music()
 	player.sel_start = 0
 	player.sel_end   = 0
@@ -589,13 +592,17 @@ play_track :: proc(track_index: int) {
 	t := &lib.tracks[track_index]
 	player.track = track_index
 
-	// A picture, a model or a document has nothing to play: selecting it shows
-	// it in the player's place instead (see draw_media_preview).
-	if t.kind != .Audio {
-		player.playing  = false
-		player.duration = 0
+	// A video plays in the preview, with its sound through this player; see
+	// video.odin. Its waveform is its audio track's.
+	if t.kind == .Video {
+		player.duration = t.duration
+		request_waveform(track_index)
+		video_open(track_index, true)
+		player.playing = true
 		return
 	}
+
+
 
 	// Asked for before anything that can fail. The waveform is read from a
 	// cache file and has nothing to do with whether playback works, so a track
@@ -642,6 +649,7 @@ play_track :: proc(track_index: int) {
 }
 
 update_audio :: proc() {
+	video_update()
 	if player.loaded {
 		rl.UpdateMusicStream(player.music)
 		check_track_end()
@@ -663,6 +671,8 @@ update_audio :: proc() {
 // the stream has often already wrapped to zero on its own.
 @(private)
 check_track_end :: proc() {
+	// A video keeps its own time and knows its own end.
+	if video_active() { return }
 	if !player.playing || player.duration <= 0 { return }
 
 	pos := player_position()
@@ -725,12 +735,14 @@ play_random_in_view :: proc() {
 }
 
 player_position :: proc() -> f32 {
+	if video_active() { return video_time() }
 	if !player.loaded { return 0 }
 	return rl.GetMusicTimePlayed(player.music)
 }
 
 // Releases the stream and the bytes behind it, in that order.
 unload_music :: proc() {
+	video_close()
 	// Or the next track inherits the last one's position and is called finished
 	// before it starts.
 	player.last_pos = 0
@@ -745,6 +757,7 @@ unload_music :: proc() {
 }
 
 toggle_play :: proc() {
+	if video_active() { video_toggle(); return }
 	if !player.loaded { return }
 	if player.playing {
 		rl.PauseMusicStream(player.music)
@@ -757,6 +770,7 @@ toggle_play :: proc() {
 // Seeking sets the remembered position too, so a deliberate jump backwards is
 // not mistaken for the stream wrapping round to the start.
 seek_to :: proc(seconds: f32) {
+	if video_active() { video_seek(seconds); return }
 	if !player.loaded { return }
 	target := clamp(seconds, 0, max(player.duration - 0.05, 0))
 	rl.SeekMusicStream(player.music, target)

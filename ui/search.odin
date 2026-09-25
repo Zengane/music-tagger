@@ -32,6 +32,9 @@ Kind_Filter :: enum { All, Music, Effects, Images, Video, Models, Documents }
 Search :: struct {
 	kind:  Kind_Filter, // one kind of file, or everything
 	sort:  Sort_Mode,   // how the results are ordered
+	// Reverses whatever the sort does. Brightness, punch and the rest already
+	// put the most first; this turns any of them round.
+	descending: bool,
 	// The track "more like this" is measured against.
 	anchor: int,
 	text:  [dynamic]u8, // the free-text box contents, as typed
@@ -78,9 +81,27 @@ sort_view :: proc() {
 		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
 			return strings.compare(lib.tracks[a].haystack, lib.tracks[b].haystack) < 0
 		})
+	case .Type:
+		// Kind first, so pictures sit with pictures, then the extension, then
+		// the name.
+		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
+			ta, tb := &lib.tracks[a], &lib.tracks[b]
+			ka, kb := type_rank(ta), type_rank(tb)
+			if ka != kb { return ka < kb }
+			if ta.ext != tb.ext { return ta.ext < tb.ext }
+			return strings.compare(ta.haystack, tb.haystack) < 0
+		})
 	case .Duration:
 		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
 			return lib.tracks[a].duration < lib.tracks[b].duration
+		})
+	case .Size:
+		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
+			return lib.tracks[a].size < lib.tracks[b].size
+		})
+	case .Modified:
+		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
+			return lib.tracks[a].mtime < lib.tracks[b].mtime
 		})
 	case .Brightness:
 		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
@@ -115,18 +136,47 @@ sort_view :: proc() {
 			       feature_distance(lib.tracks[b].features, ref)
 		})
 	}
+	if search.descending { slice.reverse(search.view[:]) }
 }
 
+// Music, effects, video, images, 3D, documents: the order of the sidebar.
+@(private)
+type_rank :: proc(t: ^Track) -> int {
+	switch t.kind {
+	case .Audio:    return t.is_sfx ? 1 : 0
+	case .Video:    return 2
+	case .Image:    return 3
+	case .Model:    return 4
+	case .Document: return 5
+	}
+	return 6
+}
+
+// Picking the sort already in force turns it round; a new one starts in its
+// own natural direction. That is how a column header behaves.
 set_sort_mode :: proc(mode: Sort_Mode) {
-	if search.sort == mode && mode != .Similar { return }
-	search.sort  = mode
+	if search.sort == mode && mode != .Similar {
+		search.descending = !search.descending
+	} else {
+		search.sort       = mode
+		search.descending = sort_default_descending(mode)
+	}
 	search.dirty = true
+	remember_sort()
+}
+
+set_sort_descending :: proc(descending: bool) {
+	if search.descending == descending { return }
+	search.descending = descending
+	search.dirty = true
+	remember_sort()
 }
 
 // "More like this one."
 sort_by_similarity_to :: proc(track_index: int) {
 	search.anchor = track_index
 	search.sort   = .Similar
+	search.descending = false
 	search.dirty  = true
 }
 
@@ -278,13 +328,11 @@ rebuild_view :: proc() {
 	or_count := 0
 	for c in search.chips { if c.op == .Any { or_count += 1 } }
 
-	// Browsing narrows to one folder; searching does not, because a query is a
-	// question about the library rather than about where you happen to be.
-	folder_only := browsing_active()
-
+	// The current folder narrows everything: with folders shown, to the files
+	// directly in it; while searching or flat, to everything underneath it.
 	track_loop: for &t, i in lib.tracks {
 		if !kind_allows(&t) { continue track_loop }
-		if folder_only && !track_in_folder(&t) { continue track_loop }
+		if !track_in_folder(&t) { continue track_loop }
 		for c in search.chips {
 			switch c.op {
 			case .Require: if !has_tag_exact(&t, c.tag) { continue track_loop }
@@ -312,6 +360,7 @@ rebuild_view :: proc() {
 	if len(search.view) == 0 && len(words) > 0 {
 		relaxed: for &t, i in lib.tracks {
 			if !kind_allows(&t) { continue relaxed }
+			if !track_in_folder(&t) { continue relaxed }
 			for c in search.chips {
 				switch c.op {
 				case .Require: if !has_tag_exact(&t, c.tag) { continue relaxed }
@@ -345,7 +394,7 @@ rebuild_view :: proc() {
 				if present[hit.index] { continue }
 				t := &lib.tracks[hit.index]
 				if !kind_allows(t) { continue }
-				if folder_only && !track_in_folder(t) { continue }
+				if !track_in_folder(t) { continue }
 				for c in search.chips {
 					switch c.op {
 					case .Require: if !has_tag_exact(t, c.tag) { continue semantic_loop }
@@ -376,7 +425,12 @@ rebuild_view :: proc() {
 
 @(private)
 kind_allows :: proc(t: ^Track) -> bool {
-	switch search.kind {
+	return track_in_section(t, search.kind)
+}
+
+// Whether a file belongs under one of the sidebar's sections.
+track_in_section :: proc(t: ^Track, k: Kind_Filter) -> bool {
+	switch k {
 	case .Music:     return t.kind == .Audio && !t.is_sfx
 	case .Effects:   return t.kind == .Audio && t.is_sfx
 	case .Images:    return t.kind == .Image

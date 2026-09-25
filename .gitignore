@@ -33,3 +33,4 @@ prefs.json
 # Built by build.sh on macOS and Linux.
 /MusicTagger
 /mtag-test
+/screenshot*.png

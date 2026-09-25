@@ -1018,13 +1018,17 @@ open_context_menu :: proc(menu: ^Context_Menu, subject: int) {
 //
 // Must be called inside `begin_modal`/`end_modal`, because the panels
 // underneath draw first and would otherwise take the click.
-context_menu :: proc(menu: ^Context_Menu, items: []cstring) -> int {
+//
+// With `checks`, each item carries a tick when its entry is true: a menu of
+// things that are on or off, like which controls the top bar shows.
+context_menu :: proc(menu: ^Context_Menu, items: []cstring, checks: []bool = nil) -> int {
 	if !menu.open { return -1 }
 
 	row_h := px(26)
 	width := px(150)
+	text_x := len(checks) > 0 ? px(30) : px(10)
 	for item in items {
-		width = max(width, text_w(.Regular, item, FS_BODY) + px(32))
+		width = max(width, text_w(.Regular, item, FS_BODY) + text_x + px(22))
 	}
 	h := row_h * f32(len(items)) + px(8)
 
@@ -1044,7 +1048,10 @@ context_menu :: proc(menu: ^Context_Menu, items: []cstring) -> int {
 			fill_round(row, ACCENT_DK, 4)
 			ui.hover_cursor = .POINTING_HAND
 		}
-		draw_text_mid(.Regular, item, row.x + px(10), row.y, row.height, FS_BODY, TEXT)
+		if i < len(checks) && checks[i] {
+			draw_icon(.Check, rect(row.x + px(6), row.y, px(16), row.height), ACCENT)
+		}
+		draw_text_mid(.Regular, item, row.x + text_x, row.y, row.height, FS_BODY, TEXT)
 		if clicked_in(row) { chosen = i }
 	}
 

@@ -33,8 +33,12 @@ EXTENSIONS: dict[str, tuple[str, ...]] = {
             ".svg", ".ai", ".eps"),
     VIDEO: (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv", ".mpg", ".mpeg",
             ".mts", ".m2ts", ".mxf", ".flv", ".3gp", ".ogv", ".prores"),
+    # Blockbench, and the formats only their own program opens (Cinema 4D,
+    # 3ds Max, Maya, SketchUp...) are listed too, so a project folder shows
+    # everything in it; see mtag/media/render3d.py for what each needs.
     MODEL: (".glb", ".gltf", ".obj", ".stl", ".ply", ".off", ".3mf", ".dae", ".fbx",
-            ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc"),
+            ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc", ".3ds", ".x3d", ".wrl",
+            ".bbmodel", ".vox", ".c4d", ".max", ".ma", ".mb", ".skp", ".lwo"),
     DOCUMENT: (".pdf", ".docx", ".txt", ".md", ".markdown", ".rtf", ".odt", ".srt",
                ".vtt", ".fountain"),
 }

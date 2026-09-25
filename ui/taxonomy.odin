@@ -136,7 +136,7 @@ IMAGE_EXTS := []string{".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif",
 
 VIDEO_EXTS := []string{".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv", ".mpg", ".mpeg", ".mts", ".m2ts", ".mxf", ".flv", ".3gp", ".ogv", ".prores"}
 
-MODEL_EXTS := []string{".glb", ".gltf", ".obj", ".stl", ".ply", ".off", ".3mf", ".dae", ".fbx", ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc"}
+MODEL_EXTS := []string{".glb", ".gltf", ".obj", ".stl", ".ply", ".off", ".3mf", ".dae", ".fbx", ".blend", ".usd", ".usda", ".usdc", ".usdz", ".abc", ".3ds", ".x3d", ".wrl", ".bbmodel", ".vox", ".c4d", ".max", ".ma", ".mb", ".skp", ".lwo"}
 
 DOCUMENT_EXTS := []string{".pdf", ".docx", ".txt", ".md", ".markdown", ".rtf", ".odt", ".srt", ".vtt", ".fountain"}
 

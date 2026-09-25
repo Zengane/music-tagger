@@ -37,6 +37,8 @@ load_folder_pick :: proc() -> bool {
 	return true
 }
 
+folder_picker_available :: proc() -> bool { return true }
+
 // Shows the picker and blocks until it closes. Returns the chosen folder, or
 // ok = false when cancelled or unavailable.
 choose_folder :: proc(title: string, allocator := context.allocator) -> (path: string, ok: bool) {

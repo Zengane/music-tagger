@@ -29,6 +29,14 @@ Prefs :: struct {
 	loop:         bool,
 	shuffle:      bool,
 	model_profile: Model_Profile, // speed against accuracy for every job; see mtag/profiles.py
+	// The browser's zoom: 0 is a tight list, 1 is big tiles. See browser.odin.
+	zoom:         f32,
+	sort:         Sort_Mode,
+	sort_desc:    bool,
+	// Folders as items in the browser with only this level's files, like a
+	// file manager, or every file underneath in one flat list.
+	show_folders: bool,
+	toolbar:      Toolbar_Set, // which optional controls the top bar carries
 }
 
 // Which models the jobs use. Auto lets the job look at the hardware.
@@ -56,6 +64,7 @@ prefs: Prefs = {
 	scale = 0, recursive = true, include_sfx = false, volume = 0.85,
 	rail_w = RAIL_W, inspect_w = INSPECT_W, rail_visible = true, inspector_auto = true, tile_size = 168,
 	folder_view = false, scrub_silent = false, hide_tagged = false, dock_h = DOCK_H, loop = false, shuffle = false,
+	zoom = 0, show_folders = true, toolbar = TOOLBAR_DEFAULT,
 }
 
 SCALE_MIN :: 0.85
@@ -104,6 +113,27 @@ load_prefs :: proc() {
 	if v, ok := json_number_field(text, "model_profile"); ok && v >= 0 && v <= f64(max(Model_Profile)) {
 		prefs.model_profile = Model_Profile(int(v))
 	}
+	if v, ok := json_number_field(text, "zoom"); ok { prefs.zoom = clamp(f32(v), 0, 1) }
+	if v, ok := json_number_field(text, "sort"); ok && v >= 0 && v <= f64(max(Sort_Mode)) {
+		prefs.sort = Sort_Mode(int(v))
+		// "More like this one" needs a track to be like; there is none at
+		// start-up.
+		if prefs.sort == .Similar { prefs.sort = .Name }
+	}
+	prefs.sort_desc    = json_bool_field(text, "sort_desc",    prefs.sort_desc)
+	prefs.show_folders = json_bool_field(text, "show_folders", prefs.show_folders)
+	if v, ok := json_number_field(text, "toolbar"); ok && v >= 0 {
+		prefs.toolbar = transmute(Toolbar_Set)u32(v)
+	}
+}
+
+// The sort outlives the session, like the zoom.
+remember_sort :: proc() {
+	if search.sort == .Similar { return }
+	if prefs.sort == search.sort && prefs.sort_desc == search.descending { return }
+	prefs.sort      = search.sort
+	prefs.sort_desc = search.descending
+	save_prefs()
 }
 
 save_prefs :: proc() {
@@ -126,7 +156,12 @@ save_prefs :: proc() {
 	fmt.sbprintf(&b, "  \"shuffle\": %s,\n", prefs.shuffle ? "true" : "false")
 	fmt.sbprintf(&b, "  \"dock_h\": %.1f,\n", prefs.dock_h)
 	fmt.sbprintf(&b, "  \"model_profile\": %d,\n", int(prefs.model_profile))
-	fmt.sbprintf(&b, "  \"tile_size\": %.1f\n", prefs.tile_size)
+	fmt.sbprintf(&b, "  \"tile_size\": %.1f,\n", prefs.tile_size)
+	fmt.sbprintf(&b, "  \"zoom\": %.3f,\n", prefs.zoom)
+	fmt.sbprintf(&b, "  \"sort\": %d,\n", int(prefs.sort))
+	fmt.sbprintf(&b, "  \"sort_desc\": %s,\n", prefs.sort_desc ? "true" : "false")
+	fmt.sbprintf(&b, "  \"show_folders\": %s,\n", prefs.show_folders ? "true" : "false")
+	fmt.sbprintf(&b, "  \"toolbar\": %d\n", transmute(u32)prefs.toolbar)
 	fmt.sbprintf(&b, "}}\n")
 	_ = os.write_entire_file(prefs_path(), transmute([]byte)strings.to_string(b))
 }

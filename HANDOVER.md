@@ -121,3 +121,83 @@ Nothing was tested with a GPU, on Windows, or on a Mac in this session.
    when torch is a CPU build — on your PC it should pass.
 3. Try the app on a mixed folder; leave Settings → Analysis models on Auto.
 4. When there is time: the measurements in `docs/audio-models.md` §4 and §5.
+
+## 7. Session 2026-09-25, later (cloud, Linux): the UI overhaul — HANDOFF
+
+The owner asked to stop using credits on this and hand off. This section is
+the state of the UI overhaul, so any session (cloud or local) can pick it up.
+
+### Done, built and tested here
+
+- **Build stamp.** The title bar, the log and `--selftest` show
+  `build <commit> · <date>`. `build.bat` passes the commit (read from `.git`
+  when git is not on PATH, as with GitHub Desktop) and prints a large
+  "BUILD FAILED — MusicTagger.exe was NOT updated" box on failure. The Browse
+  button was already in the code; the owner's copy was most likely an old
+  .exe. The stamp settles that question next time.
+- **+ beside LIBRARIES opens the system folder picker directly** (typed path
+  only where no picker exists).
+- **Sidebar** (`ui/sidebar.odin`): LIBRARIES, SHOW (All, Music, Sound
+  effects, Video, Images, 3D models, Documents, with counts — always listed),
+  FOLDERS (a real tree, `ui/browse.odin`, counted per section), TAGS. Every
+  section folds.
+- **One browser instead of List + Grid** (`ui/browser.odin`, tiles in
+  `ui/grid.odin`). A zoom slider (top bar, Ctrl+wheel, V key) goes from a list
+  with columns Name / Tags / Type / Length / Size / Modified (click a header
+  to sort, again to reverse) to tiles. Folders show as items (file-manager
+  style) or everything flat — toggle in the top bar. Search looks under the
+  current folder. Status line at the bottom. Backspace = up a folder.
+  Video tiles scrub on hover (filmstrip). Double-click opens the big viewer.
+- **Top bar** (`ui/toolbar.odin`): sidebar toggle, up, breadcrumb, search,
+  sort (10 options + direction arrow), zoom, folders toggle, Browse/Map/Tag,
+  Undo, Analyze, Save, panel toggle, settings. **Right-click the bar** to
+  choose which controls it shows (saved in prefs). No overlaps at any width
+  from 1040 to 2600 (`--windowcheck`).
+- **Previews** (`ui/preview.odin`, `ui/viewer.odin`, `ui/video.odin`,
+  `ui/viewer3d.odin`, `preview_job.py`):
+  - images: large version (ffmpeg, cached), zoom/pan in the viewer;
+  - video: real playback (ffmpeg frames + its audio through the normal
+    player, so the dock transport and waveform work on video);
+  - 3D: interactive viewer (drag turn, wheel zoom, right-drag move,
+    wireframe, turntable). raylib loads glTF/OBJ/VOX; everything else is
+    converted once to GLB: STL/PLY/OFF/3MF/DAE (trimesh), **Blockbench
+    .bbmodel** and **MagicaVoxel .vox** (own converters,
+    `mtag/media/bbmodel.py`, `voxel.py`), FBX/.blend/USD/ABC/3DS/X3D
+    (Blender, when installed). Cinema 4D, 3ds Max, Maya, SketchUp, LightWave
+    files are listed and tagged by name, and the preview says to export them.
+    Model and PDF tiles get thumbnails rendered by the app itself.
+  - documents: PDF pages (pypdfium2), text of .docx/.odt/.rtf, plain text
+    files read directly.
+- **Preview panel** (`ui/inspector.odin`): the file's preview on top, facts,
+  what it shows, tags with a type-to-add box, markers/game for music, the tag
+  buttons and model scores in folding sections (tag buttons folded for media).
+- Looking at a picture no longer stops the music. The player shrinks to its
+  transport in the Images / 3D / Documents sections.
+- F12 saves a screenshot to `logs/` (useful for bug reports).
+- Tests: `--selftest` all pass (browsing checks rewritten for folders);
+  `tests_preview.py` new, passes; `tests_media.py` passes; Linux build,
+  Windows object and macOS type-check all compile.
+
+### Not done yet (in order)
+
+1. **Settings overhaul** (task from the owner): a full settings page with
+   sections — General (scale, scrubbing), Library (import options, rescan),
+   Analysis & models (profile, and a list of **installed models with size and
+   folder**: read the Hugging Face cache, e.g. a small `models_job.py` using
+   `huggingface_hub.scan_cache_dir()`, plus where `model/tagger.pkl` is),
+   Storage (sizes of `cache/*`, with Clear buttons), About (build stamp,
+   credits/licences). Today `draw_settings` in `ui/app.odin` is still the old
+   popover, now called with the whole window as its rect — **it draws at the
+   top-left and should be replaced first**.
+2. Not seen on screen yet: the big viewer (image zoom, video bar, PDF pages,
+   text), video playback end to end, and the document preview. The code is
+   in and compiles; check each with F12 screenshots under Xvfb.
+3. Docs: README "What it does" / keys (B, V, Backspace, F12, right-click top
+   bar), `docs/overview.md`, `docs/model-licences.md` (pypdfium2 is already
+   listed; nothing new is downloaded).
+4. Small: remember the last open folder; `tile_size` pref is now unused.
+
+### For the owner
+
+Pull, run `build.bat`, check the title bar says `build <new commit>`, then
+`venv\Scripts\python.exe -m pip install -r requirements.txt`.
