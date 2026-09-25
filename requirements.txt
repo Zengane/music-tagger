@@ -62,6 +62,7 @@ python-docx==1.2.0      # MIT
 trimesh==5.1.0          # MIT
 sentencepiece==0.2.2    # Apache-2.0; tokenizers for SigLIP 2 and E5
 protobuf==7.36.2        # BSD-3
+timm==1.0.30            # Apache-2.0; PE-AV's checkpoints include a video tower built on it
 # Optional, not installed by default:
 #   resvg-py     SVG thumbnails and tags (MIT wrapper, resvg is MPL-2.0)
 #   pycollada    .dae models

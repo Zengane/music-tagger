@@ -359,6 +359,14 @@ apply_result :: proc(obj: json.Object) {
 		t.description_dirty = true
 	}
 	if t.description_dirty { rebuild_text_haystack(t, lib_allocator()) }
+	// A video's length comes from the analysis; there is no waveform to read it from.
+	if t.kind == .Video {
+		if m, has := obj["metrics"]; has {
+			if mo, is_obj := m.(json.Object); is_obj {
+				if d := json_num(mo, "duration"); d > 0 { t.duration = f32(d) }
+			}
+		}
+	}
 	if json_str(obj, "thumb") != "" { forget_thumbnail(index) }
 
 	if t.kind == .Audio { assign_closest_mood(t) }

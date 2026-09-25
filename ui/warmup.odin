@@ -104,7 +104,7 @@ stop_warmup :: proc() {
 load_all_features :: proc() -> int {
 	loaded := 0
 	for &t in lib.tracks {
-		if t.features.valid { continue }
+		if t.kind != .Audio || t.features.valid { continue }
 		if !peaks_cache_valid(peak_key_of(&t)) { continue }
 		p, ok := peaks_load(&t)
 		if !ok { continue }

@@ -143,6 +143,41 @@ class SoundModelPlumbing(unittest.TestCase):
             for tag in tags:
                 self.assertIn(tag, sfxtax.SFX_PROMPTS, f"{group}: {tag}")
 
+    def test_audio_video_checkpoint(self):
+        # The published PE-AV checkpoints are audio-video models. Only the
+        # audio and text parts are kept, and they must be the trained ones.
+        try:
+            import timm  # noqa: F401
+        except ImportError:
+            self.skipTest("timm is not installed")
+        import torch
+        from transformers import AutoModel, PeAudioVideoConfig, PeAudioVideoModel, PreTrainedTokenizerFast
+        from transformers.models.pe_audio.feature_extraction_pe_audio import PeAudioFeatureExtractor
+        import mtag.encoders as E
+
+        out = Path(self.tmp.name) / "pe-av"
+        small = dict(hidden_size=32, intermediate_size=64, num_hidden_layers=1, num_attention_heads=2, head_dim=16)
+        cfg = PeAudioVideoConfig(
+            text_config=dict(model_type="modernbert", vocab_size=500, hidden_size=32, intermediate_size=64,
+                             num_hidden_layers=2, num_attention_heads=2, pad_token_id=1, bos_token_id=0,
+                             eos_token_id=2, cls_token_id=0, sep_token_id=2),
+            audio_video_config=dict(**small,
+                audio_config=dict(**small, dac_config=dict(encoder_hidden_size=8, codebook_dim=16)),
+                video_config=dict(**small, vision_config=dict(
+                    architecture="vit_tiny_patch16_224", num_classes=8,
+                    model_args={"embed_dim": 32, "depth": 1, "num_heads": 2, "img_size": 32}))))
+        PeAudioVideoModel(cfg).save_pretrained(out)
+        PreTrainedTokenizerFast(tokenizer_object=_bpe(), pad_token="<pad>", unk_token="<unk>",
+                                cls_token="<s>").save_pretrained(out)
+        PeAudioFeatureExtractor().save_pretrained(out)
+
+        enc = type("TinyPeAv", (E.PeAvEncoder,), {"MODEL_ID": str(out)})()
+        enc.load()
+        self.assertFalse(hasattr(enc.model, "video_model"))
+        ref = AutoModel.from_pretrained(out).audio_model.text_audio_head.proj.weight
+        self.assertTrue(torch.allclose(ref, enc.model.text_audio_head.proj.weight.float()))
+        self.assertEqual(enc.embed_windows_file(self.wav).shape[0], 2)
+
     def test_in_a_fusion(self):
         import mtag.encoders as E
 

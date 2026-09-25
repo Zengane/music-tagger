@@ -206,7 +206,9 @@ scan_worker :: proc() {
 	}
 	// Read waveform metadata on this worker, never on the drawing thread.
 	for &t in out.tracks {
-		if peaks_cache_valid(peak_key_of(&t)) {
+		// Only audio has a waveform. A stale entry for a video, left from
+		// before that rule, gave clips durations that were not theirs.
+		if t.kind == .Audio && peaks_cache_valid(peak_key_of(&t)) {
 			if peaks, ok := peaks_load(&t); ok {
 				t.features = peaks.features
 				t.duration = peaks.duration

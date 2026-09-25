@@ -352,25 +352,42 @@ class PeAvEncoder(Encoder):
     batch = 8
 
     def load(self):
-        from transformers import AutoModel, AutoProcessor
+        from transformers import AutoModel, PeAudioModel
 
         dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
-        model = AutoModel.from_pretrained(self.MODEL_ID, dtype=dtype)
-        if hasattr(model, "audio_model"):
+        from transformers import AutoConfig
+
+        # The published checkpoints are the audio-video model; an audio-only
+        # one (as the tests build) is loaded as it is. For the audio-video
+        # model the whole thing is loaded — its video tower needs `timm` — and
+        # only the audio and text parts are kept.
+        if AutoConfig.from_pretrained(self.MODEL_ID).model_type == "pe_audio":
+            model = PeAudioModel.from_pretrained(self.MODEL_ID, dtype=dtype)
+        else:
+            model = AutoModel.from_pretrained(self.MODEL_ID, dtype=dtype)
             audio = model.audio_model
             for attr in ("video_model", "audio_video_encoder"):
                 if hasattr(model, attr):
                     delattr(model, attr)
             del model
             model = audio
+            free_vram()
         self.model = model.to(_DEVICE).eval()
-        proc = AutoProcessor.from_pretrained(self.MODEL_ID)
-        self.feature_extractor = getattr(proc, "feature_extractor", proc)
-        self.tokenizer = getattr(proc, "tokenizer", None)
-        if self.tokenizer is None:
-            from transformers import AutoTokenizer
 
+        # The feature extractor and the tokenizer on their own: the full
+        # audio-video processor also wants a video processor, which is one
+        # more thing that can be missing and is not needed here.
+        try:
+            from transformers import AutoFeatureExtractor, AutoTokenizer
+
+            self.feature_extractor = AutoFeatureExtractor.from_pretrained(self.MODEL_ID)
             self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
+        except Exception:
+            from transformers import AutoProcessor
+
+            proc = AutoProcessor.from_pretrained(self.MODEL_ID)
+            self.feature_extractor = getattr(proc, "feature_extractor", proc)
+            self.tokenizer = proc.tokenizer
         self.logit_scale = float(self.model.text_audio_logit_scale.detach().float().cpu())
         self.logit_bias = float(self.model.text_audio_logit_bias.detach().float().cpu())
 
