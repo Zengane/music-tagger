@@ -259,3 +259,87 @@ the position per video, smoother seeking (keep ffmpeg running and read ahead).
 Done since: README "Finding your way around"; the app reopens the folder you
 were in (prefs `last_folder`, kept across rescans of the same library); the
 self test no longer writes prefs.json (`prefs_frozen`).
+
+## 8. NEXT SESSION BRIEF (start here) — written 2026-09-25 with the last credit
+
+Branch `claude/kind-allen-v29vjx`. Read §0 (the owner's working rules) and §7
+(what the UI overhaul built) first. Everything below is **not done**.
+
+### Fixed just before handing over
+- **"Add a folder" (+ beside LIBRARIES) did nothing.** The section header
+  under the button called `clicked_in(head)` before checking the button,
+  which consumed the click (`ui/sidebar.odin`, `rail_header`). Now the
+  button is checked first. Not yet confirmed on the owner's PC — ask. If it
+  still fails on Windows, look next at `choose_folder` in
+  `ui/folderpick_windows.odin` (IFileOpenDialog; never run on Windows) and
+  the fallback typed-path editor (`open_tag_editor(.Add_Library…)`).
+
+### The owner's requests, in their words, with a plan for each
+
+1. **Video player "closer to mpv"; seamless: "I click a file, it starts
+   playing, the controls are there, I hit Escape and I go back to my files."**
+   - Today: `ui/video.odin` (ffmpeg → raw RGBA frames on a thread, audio via
+     a cached WAV through the normal player, clock follows the audio);
+     panel controls and the full-window viewer in `ui/viewer.odin`
+     (`draw_video_view`, `draw_video_bar`, `draw_viewer`); click handling in
+     `browser_item_input` (`ui/browser.odin`); setting `video_click_plays`.
+   - Wanted behaviour: a click on a video opens the full-window player and
+     plays at once; Escape closes it (Escape already closes the viewer in
+     `handle_keys`). mpv-style: controls over the picture that fade after
+     ~1.5 s without mouse movement, click = pause, double-click = full
+     screen, wheel = volume, ←/→ 5 s, Shift ←/→ 1 s, `,` `.` frame step, `[`
+     `]` speed, M mute, an on-screen message for each ("Volume 80%").
+   - Quality: decode is plain ffmpeg at up to 1280x720/30 fps; seeking
+     restarts ffmpeg. Better: keep reading ahead, `-hwaccel auto`, decode at
+     the size shown, full frame rate. The real fix is **libmpv** rendered
+     into a raylib texture (mpv render API). mpv is GPL by default; an
+     LGPL build (`-Dgpl=false`) exists. The product is sold, so this is a
+     licence decision: **ask the owner before switching approach** (rule).
+   - Not testable in the cloud: no sound device. The owner tests sound.
+
+2. **Drag footage into the Premiere timeline.** Dragging files out already
+   exists for audio (`maybe_start_drag` → `drag_current_selection`,
+   `ui/dragdrop_windows.odin`, and the Premiere bridge in `ui/premiere.odin`
+   / `premiere/`). Check that it works for video (and images) — it may be
+   filtered to audio or to the selection's audio ranges — and make "Send to
+   Premiere" in the right-click menu place video too. Never send keystrokes
+   to Premiere (rule).
+
+3. **Image viewer "same thing"**: click → full window, Escape back, wheel
+   zoom at the pointer, drag to move, arrows for next/previous. Most of this
+   is in `draw_image_view`; what is missing is opening on one click and the
+   same fading controls as the video.
+
+4. **PDF viewer: blurry, and text cannot be selected.**
+   - Blurry: `preview_job.py pages` renders at 1400 px wide; the viewer
+     scales that. Render at the width it is shown × the display scale, or at
+     2x, and use `draw_texture` without scaling up.
+   - Selectable text: extend `preview_job.py` to write, per page, the
+     characters and their boxes (pypdfium2 `PdfTextPage.get_charbox`) as
+     JSON; in `draw_document_view` hit-test a drag against the boxes, draw
+     the highlight, and copy with Ctrl C (`copy_text_to_clipboard`).
+
+5. **The new icons "aren't very good".** They are Lucide icons added by
+   `ui/gen_icons.py` (the `NEW` table; regenerate, never hand-edit
+   `ui/icondata.odin`). Ask the owner which ones and what style they want
+   before changing them; show a screenshot of the candidates.
+
+### How to test in a cloud session (Linux)
+- Odin at `/opt/src/odin/odin` (build it with `./build_odin.sh release` if
+  missing); raylib static lib built from source. `venv -> /opt/venv`.
+- `odin build ui -out:MusicTagger -o:minimal -define:BUILD_ID=test`, then
+  `./MusicTagger --selftest /tmp/lib` (sample library: rebuild with the
+  fixtures in `tests_preview.py` and a few ffmpeg test clips if /tmp is gone).
+- Screens: `Xvfb :42 -screen 0 1600x1000x24 &`, run the app with
+  `DISPLAY=:42`, move the window to 0,0 with xdotool, click with
+  mousedown / sleep 0.12 / mouseup, press F12 (keydown/keyup) — the app saves
+  `logs/screenshot-N.png`; read it to look.
+- Windows can only be compiled here:
+  `odin build ui -target:windows_amd64 -build-mode:obj -o:speed -out:/tmp/x.obj`.
+- Python checks: `venv/bin/python tests_preview.py`, `tests_media.py`.
+
+### The owner's PC
+Windows, GitHub Desktop, folder `C:\Users\simsi\music-tagger-v2`. Update =
+Fetch origin → Pull origin (if it complains about `ui\taxonomy.odin`, "Stash
+changes and continue" is safe) → `build.bat` → the title bar shows
+`build <commit>`. They are new to GitHub; give click-by-click steps.
