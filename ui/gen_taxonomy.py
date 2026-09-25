@@ -107,7 +107,9 @@ def main() -> None:
         sfx_groups_of("MEDIA_GROUPS", list(media_vocab.all_tags().items())),
     ]
     dest = ROOT / "ui" / "taxonomy.odin"
-    dest.write_text("".join(out), encoding="utf-8")
+    # Unix line endings on every system, or on Windows every build would leave
+    # this file looking changed to git and block the next pull.
+    dest.write_text("".join(out), encoding="utf-8", newline="\n")
     print(f"wrote {dest} ({dest.stat().st_size} bytes)")
 
 
