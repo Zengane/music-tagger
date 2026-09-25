@@ -568,7 +568,7 @@ draw_app :: proc() {
 
 	if app.settings_open {
 		begin_modal()
-		draw_settings(rect(0, 0, W, H))
+		draw_settings(rect(W - px(340) - px(PAD), top.y + top.height + px(6), px(340), px(500)))
 		end_modal()
 	}
 

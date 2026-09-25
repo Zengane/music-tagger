@@ -187,8 +187,7 @@ the state of the UI overhaul, so any session (cloud or local) can pick it up.
    `huggingface_hub.scan_cache_dir()`, plus where `model/tagger.pkl` is),
    Storage (sizes of `cache/*`, with Clear buttons), About (build stamp,
    credits/licences). Today `draw_settings` in `ui/app.odin` is still the old
-   popover, now called with the whole window as its rect — **it draws at the
-   top-left and should be replaced first**.
+   popover under the gear.
 2. Not seen on screen yet: the big viewer (image zoom, video bar, PDF pages,
    text), video playback end to end, and the document preview. The code is
    in and compiles; check each with F12 screenshots under Xvfb.
