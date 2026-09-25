@@ -84,7 +84,7 @@ toolbar_right_width :: proc() -> f32 {
 	if shows(.Rescan) { w += px(30) + px(GAP) }
 	if shows(.Add_Library) { w += px(30) + px(GAP) }
 	if shows(.Views) { w += px(VIEW_SWITCH_W) + px(GAP * 2) }
-	if shows(.Folders) && app.view == .Browse { w += px(30) + px(GAP) }
+	if shows(.Folders) && app.view == .Browse && search.kind == .All { w += px(30) + px(GAP) }
 	if shows(.Zoom) && app.view == .Browse { w += px(ZOOM_W) + px(GAP * 2) }
 	if shows(.Sort) && app.view == .Browse { w += px(SORT_W + 30) + px(GAP) }
 	if shows(.Count) { w += text_w(.Regular, status_summary(), FS_SMALL) + px(GAP * 2) }
@@ -237,7 +237,7 @@ draw_topbar :: proc(r: Rect) {
 	}
 
 	if app.view == .Browse {
-		if shows(.Folders) {
+		if shows(.Folders) && search.kind == .All {
 			b := rect(edge - px(30), cy, px(30), px(28))
 			audit_rect(b, "folders")
 			tip(b, prefs.show_folders ? "Showing folders, and the files in this one. Click to list every file underneath instead." \

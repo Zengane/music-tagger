@@ -124,6 +124,10 @@ draw_waveform :: proc(r: Rect) {
 		return
 	}
 	if !player.has_peaks {
+		if video_active() && video.probed && !video.has_audio {
+			centre_message(r, "This video has no sound")
+			return
+		}
 		centre_message(r, "reading waveform…")
 		return
 	}

@@ -76,6 +76,9 @@ section_color :: proc(k: Kind_Filter) -> rl.Color {
 choose_section :: proc(k: Kind_Filter) {
 	set_kind_filter(k)
 	clear(&app.selection)
+	// The file being previewed may not be in the new section; the panel then
+	// shows the first one that is.
+	app.selected = -1
 	invalidate_nodes()
 	invalidate_tagging()
 	app.browser_scroll.offset = 0

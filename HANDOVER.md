@@ -218,11 +218,24 @@ Pull, run `build.bat`, check the title bar says `build <new commit>`, then
 The scans run on a background thread when the page opens. Checked on screen
 under Xvfb; `--selftest`, `--windowcheck`, Windows object and macOS check pass.
 
+### Checked on screen (third part)
+
+Video plays in the panel (frames advance, stops at the end, length learnt);
+the big viewer opens and the arrow keys step through files; PDF pages and
+.docx text show in the panel. Fixes made while checking: the viewer's
+backdrop is solid; a silent video says so instead of "reading waveform…";
+picking a section (Video, Images…) lists every file of that kind under the
+current folder instead of making you open folders (All files keeps the
+folder view); the preview panel follows the section.
+
+Owner's PC note: the pull on 2026-09-25 did not go through (the old
+build.bat ran). Check GitHub Desktop → History shows the newest commit
+before building.
+
 ### Still to do (next session)
 
-1. Look at, on screen, the big viewer (image zoom, video bar, PDF pages,
-   text), video playback end to end, and the document preview. The code is
-   in and compiles but was not seen working.
+1. Not seen on this machine (no sound device here): video with sound, and
+   the video bar's scrubbing in the big viewer. Check on the PC.
 2. README: new layout, keys (B, V, Backspace, F12, right-click the top bar),
    settings page.
 3. Small: remember the last open folder; `tile_size` pref is unused.

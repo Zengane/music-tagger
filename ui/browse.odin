@@ -165,8 +165,12 @@ search_active :: proc() -> bool {
 
 // Folders appear as items in the browser, and only this level's files with
 // them. Off, or during a search, the browser lists everything underneath.
+//
+// Only under All files: choosing Video (or any one kind) means "show me my
+// videos", all of them under the current folder, not a walk through folders
+// to find them. The tree in the sidebar still narrows it.
 browsing_active :: proc() -> bool {
-	return prefs.show_folders && !search_active()
+	return prefs.show_folders && !search_active() && search.kind == .All
 }
 
 // Whether a track belongs in the view, as far as folders go.

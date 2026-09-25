@@ -64,7 +64,7 @@ draw_viewer :: proc(screen: Rect) {
 	if viewer.index < 0 || viewer.index >= len(lib.tracks) { close_viewer(); return }
 	t := &lib.tracks[viewer.index]
 
-	fill(screen, rl.Color{8, 9, 12, 246})
+	fill(screen, rl.Color{8, 9, 12, 255})
 
 	// The bar along the top: what it is, where it is in the list, and out.
 	bar := rect(screen.x, screen.y + px(TITLEBAR_H), screen.width, px(48))
