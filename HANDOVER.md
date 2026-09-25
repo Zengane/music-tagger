@@ -232,6 +232,24 @@ Owner's PC note: the pull on 2026-09-25 did not go through (the old
 build.bat ran). Check GitHub Desktop → History shows the newest commit
 before building.
 
+### Video playback (fourth part, ~$6 of credit left)
+
+- Settings → General → "One click plays a video" (pref `video_click_plays`,
+  default on). Off: a click shows the first frame, a double click plays.
+  With it on, a double click opens the big viewer.
+- The preview panel has video controls under the picture (play, scrub bar
+  with a filmstrip frame on hover, time); the volume stays in the player.
+- Clicking the video that is already open no longer restarts it.
+- Fix: choosing a section while inside a folder with none of that kind goes
+  back to the top instead of showing an empty list.
+- `build.bat` reads the build code with `ui/build_id.py` and runs inside a
+  window that stays open (it was closing instantly on the owner's PC).
+
+The owner wants the image, video and text viewers overhauled further; video
+first ("the player isn't very good feeling"). Ideas not done: controls
+over the picture on hover, keyboard J/K/L and frame stepping, remembering
+the position per video, smoother seeking (keep ffmpeg running and read ahead).
+
 ### Still to do (next session)
 
 1. Not seen on this machine (no sound device here): video with sound, and

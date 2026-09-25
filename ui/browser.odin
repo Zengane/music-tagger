@@ -427,7 +427,16 @@ browser_item_input :: proc(r: Rect, index: int, vi: int) {
 	if app.inspector_auto { app.inspector = true }
 
 	// A double click opens the big view of anything that is not a sound.
-	if double && !shift && !ctrl && lib.tracks[index].kind != .Audio { open_viewer(index) }
+	//
+	// With "double-click plays videos" on, the first click only showed the
+	// video's first frame, and this click is the one that plays it.
+	if double && !shift && !ctrl && lib.tracks[index].kind != .Audio {
+		if lib.tracks[index].kind == .Video && !prefs.video_click_plays {
+			if !(video_active() && video.index == index && video.playing) { toggle_play() }
+		} else {
+			open_viewer(index)
+		}
+	}
 
 	// A press is not yet a drag. It becomes one only once the pointer has
 	// actually moved, so a plain click still selects.

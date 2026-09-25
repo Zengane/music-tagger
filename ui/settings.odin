@@ -359,6 +359,10 @@ settings_general :: proc(x, y_in, w: f32) -> f32 {
 
 	section_label(x, y, "PLAYING")
 	y += px(22)
+	if checkbox(x, y, "One click plays a video", &prefs.video_click_plays) { save_prefs() }
+	y += px(22)
+	y = settings_hint(x, y, w, "Off, a click shows the video's first frame and a double click plays it.")
+	y += px(8)
 	if checkbox(x, y, "Scrubbing is silent", &prefs.scrub_silent) { save_prefs() }
 	y += px(22)
 	y = settings_hint(x, y, w, "Dragging along the waveform stays quiet, then plays from where you let go.")

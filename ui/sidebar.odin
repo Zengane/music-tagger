@@ -75,6 +75,8 @@ section_color :: proc(k: Kind_Filter) -> rl.Color {
 // Switches the browser to one kind of file.
 choose_section :: proc(k: Kind_Filter) {
 	set_kind_filter(k)
+	// A folder with none of this kind in it would show nothing: back to the top.
+	if n := folder_node(browse.folder); n < 0 || folder_tree.nodes[n].counts[k] == 0 { set_browse_folder("") }
 	clear(&app.selection)
 	// The file being previewed may not be in the new section; the panel then
 	// shows the first one that is.

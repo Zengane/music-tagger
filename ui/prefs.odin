@@ -38,6 +38,7 @@ Prefs :: struct {
 	// file manager, or every file underneath in one flat list.
 	show_folders: bool,
 	toolbar:      Toolbar_Set, // which optional controls the top bar carries
+	video_click_plays: bool, // one click plays a video; off, a double click does
 	// Where you were: the folder, and the library it is in. Owned.
 	last_folder:      string,
 	last_folder_root: string,
@@ -68,7 +69,7 @@ prefs: Prefs = {
 	scale = 0, recursive = true, include_sfx = false, volume = 0.85,
 	rail_w = RAIL_W, inspect_w = INSPECT_W, rail_visible = true, inspector_auto = true, tile_size = 168,
 	folder_view = false, scrub_silent = false, hide_tagged = false, dock_h = DOCK_H, loop = false, shuffle = false,
-	zoom = 0, show_folders = true, toolbar = TOOLBAR_DEFAULT,
+	zoom = 0, show_folders = true, toolbar = TOOLBAR_DEFAULT, video_click_plays = true,
 }
 
 SCALE_MIN :: 0.85
@@ -125,6 +126,7 @@ load_prefs :: proc() {
 		if prefs.sort == .Similar { prefs.sort = .Name }
 	}
 	prefs.sort_desc    = json_bool_field(text, "sort_desc",    prefs.sort_desc)
+	prefs.video_click_plays = json_bool_field(text, "video_click_plays", prefs.video_click_plays)
 	prefs.show_folders = json_bool_field(text, "show_folders", prefs.show_folders)
 	prefs.last_folder      = json_string_field(text, "last_folder")
 	prefs.last_folder_root = json_string_field(text, "last_folder_root")
@@ -171,6 +173,7 @@ save_prefs :: proc() {
 	fmt.sbprintf(&b, "  \"zoom\": %.3f,\n", prefs.zoom)
 	fmt.sbprintf(&b, "  \"sort\": %d,\n", int(prefs.sort))
 	fmt.sbprintf(&b, "  \"sort_desc\": %s,\n", prefs.sort_desc ? "true" : "false")
+	fmt.sbprintf(&b, "  \"video_click_plays\": %s,\n", prefs.video_click_plays ? "true" : "false")
 	fmt.sbprintf(&b, "  \"show_folders\": %s,\n", prefs.show_folders ? "true" : "false")
 	fmt.sbprintf(&b, "  \"last_folder\": %s,\n", json_quote(prefs.last_folder))
 	fmt.sbprintf(&b, "  \"last_folder_root\": %s,\n", json_quote(prefs.last_folder_root))

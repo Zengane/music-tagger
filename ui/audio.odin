@@ -582,6 +582,8 @@ play_track :: proc(track_index: int) {
 	// A picture, a model or a document has nothing to play, and looking at one
 	// should not stop the music that is playing.
 	if k := lib.tracks[track_index].kind; k == .Image || k == .Model || k == .Document { return }
+	// Clicking the video that is already open leaves it where it is.
+	if lib.tracks[track_index].kind == .Video && video_active() && video.index == track_index { return }
 	unload_music()
 	player.sel_start = 0
 	player.sel_end   = 0
@@ -597,8 +599,9 @@ play_track :: proc(track_index: int) {
 	if t.kind == .Video {
 		player.duration = t.duration
 		request_waveform(track_index)
-		video_open(track_index, true)
-		player.playing = true
+		// A click plays it, or only shows its first frame (Settings, General).
+		video_open(track_index, prefs.video_click_plays)
+		player.playing = prefs.video_click_plays
 		return
 	}
 

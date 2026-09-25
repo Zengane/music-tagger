@@ -232,7 +232,7 @@ draw_video_view :: proc(r: Rect, index: int) {
 }
 
 // Play, where it is, a bar to scrub, and the volume.
-draw_video_bar :: proc(r: Rect, index: int) {
+draw_video_bar :: proc(r: Rect, index: int, with_volume := true) {
 	active := video_active() && video.index == index
 	b := rect(r.x, r.y + (r.height - px(34)) * 0.5, px(34), px(34))
 	if icon_button(b, active && video.playing ? .Pause : .Play, true) {
@@ -242,13 +242,15 @@ draw_video_bar :: proc(r: Rect, index: int) {
 	dur := active && video.duration > 0 ? video.duration : lib.tracks[index].duration
 	label := fmt.ctprintf("%s / %s", fmt_time(pos), fmt_time(dur))
 	lw := text_w(.Regular, label, FS_SMALL)
-	vol := rect(r.x + r.width - px(130), r.y + (r.height - px(30)) * 0.5, px(130), px(30))
+	// The panel is narrow and the player below has the volume already.
+	vol := with_volume ? rect(r.x + r.width - px(130), r.y + (r.height - px(30)) * 0.5, px(130), px(30)) \
+	                   : rect(r.x + r.width, r.y, 0, r.height)
 	level := player.volume
-	if volume_control(vol, &level, &player.muted) {
+	if with_volume && volume_control(vol, &level, &player.muted) {
 		set_volume(player.muted ? 0 : level)
 		player.volume = level
 	}
-	draw_text_mid(.Regular, label, vol.x - lw - px(16), r.y, r.height, FS_SMALL, TEXT_DIM)
+	draw_text_mid(.Regular, label, vol.x - lw - (with_volume ? px(16) : 0), r.y, r.height, FS_SMALL, TEXT_DIM)
 
 	track := rect(b.x + b.width + px(14), r.y + r.height * 0.5 - px(3), vol.x - lw - px(32) - (b.x + b.width + px(14)), px(6))
 	grab := rect(track.x, r.y, track.width, r.height)
@@ -441,7 +443,8 @@ draw_document_bar :: proc(r: Rect, index: int) {
 // wide.
 preview_height :: proc(t: ^Track, w: f32) -> f32 {
 	switch t.kind {
-	case .Image, .Video: return w * 0.62
+	case .Image:         return w * 0.62
+	case .Video:         return w * 0.5625 + px(44) // the picture, then its controls
 	case .Model:         return w * 0.8 + px(36)
 	case .Document:      return w * 1.1
 	case .Audio:         return 0
@@ -454,12 +457,15 @@ draw_preview_media :: proc(r: Rect, index: int) {
 	t := &lib.tracks[index]
 	pic := r
 	if t.kind == .Model { pic = rect(r.x, r.y, r.width, r.height - px(36)) }
+	if t.kind == .Video { pic = rect(r.x, r.y, r.width, r.height - px(44)) }
 	// Checked before the picture, which takes clicks of its own.
 	expand := rect(pic.x + pic.width - px(34), pic.y + px(6), px(28), px(28))
 	if clicked_in(expand) { open_viewer(index); return }
 	switch t.kind {
 	case .Image:    draw_image_view(pic, index, false)
-	case .Video:    draw_video_view(pic, index)
+	case .Video:
+		draw_video_view(pic, index)
+		draw_video_bar(rect(r.x, pic.y + pic.height + px(4), r.width, px(40)), index, false)
 	case .Model:
 		draw_model_view(pic, index, true)
 		draw_model_toolbar(rect(r.x, pic.y + pic.height + px(4), r.width, px(28)), index)
