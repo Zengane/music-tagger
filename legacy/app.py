@@ -19,6 +19,11 @@ from pathlib import Path
 import numpy as np
 from flask import Flask, jsonify, render_template, request, send_file
 
+import sys as _sys
+# Moved to legacy/ on 2026-09-25. The project root holds mtag/, the model and
+# libraries.json, so it goes on the path and data paths point there.
+_sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+
 from mtag.dataset import EmbeddingCache
 from mtag.encoders import get_encoder
 from mtag.model import MODEL_PATH, Tagger
@@ -36,7 +41,7 @@ _batch = {"running": False, "done": 0, "total": 0, "error": "", "results": {}}
 _retrain = {"running": False, "log": "", "error": ""}
 _wave_cache = {}
 _wave_build = {"running": False, "done": 0, "total": 0}
-_APP_DIR = Path(__file__).resolve().parent
+_APP_DIR = Path(__file__).resolve().parent.parent  # the project root
 _WAVE_DIR = _APP_DIR / "cache" / "waveforms"
 _CLIP_DIR = _APP_DIR / "cache" / "clips"
 _LIBRARIES_PATH = _APP_DIR / "libraries.json"

@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0"
+cd /d "%~dp0.."
 title Build Music Tagger executable
 
 if not exist "venv\Scripts\python.exe" (
@@ -15,7 +15,7 @@ if errorlevel 1 (
 )
 
 echo Building dist\MusicTagger.exe...
-venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --windowed --name MusicTagger launcher.py
+venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --windowed --name MusicTagger legacy\launcher.py
 if errorlevel 1 (
     echo ERROR: Build failed.
     pause & exit /b 1

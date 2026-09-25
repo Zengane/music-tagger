@@ -76,7 +76,7 @@ keystroke in search is one pass over the list. Nothing to fix there.
 
 | | Item | What to do |
 |---|---|---|
-| Medium | **The old browser UI is still in the repository**: `app.py`, `desktop.py`, `launcher.py`, `templates/`, `run-webview.bat`, `build-webview.bat`, and `flask` and `pywebview` in the requirements. The native app replaced it. | Two options: delete it (my pick — nothing uses it, and it doubles what a reader has to understand), or move it to a `legacy/` folder. Your decision. |
+| — | The old browser UI (`app.py`, `desktop.py`, `launcher.py`, `templates/`, the two webview `.bat` files) sat at the top level. | Moved to `legacy/` on 2026-09-25; it still runs from there. Delete the folder, and `flask`/`pywebview` from requirements, once nobody needs it. **Done.** |
 | Medium | `ui/app.odin` is 3,500 lines and holds the top bar, the list, the inspector, the dock, the menus and the key handling. | Split it along those lines when next touched. No behaviour change. |
 | Low | Development scripts with personal paths sit at the top level: `bakeoff.py`, `sweep.py`, `work_bench.py`, `fix_tags.py`, `drops.txt`. | Move them to `tools/`. |
 | Low | `premiere/ZenDrop/bridge/ZenDropSend.exe` is a compiled binary in git. | Build it in the release step instead. Also: decide whether Zen Drop stays in this repository before it is made public (from the handover). |

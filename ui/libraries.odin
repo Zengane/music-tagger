@@ -8,7 +8,7 @@ package musictagger
 // on purpose, named, reordered, and removed on purpose.
 //
 // The file stays readable by the Python side. It still writes `folders` as a
-// flat array of paths, which is all `app.py` looks for, and adds `libraries`
+// flat array of paths, which is all `legacy/app.py` looks for, and adds `libraries`
 // with the names and `last` with whichever was open. An older file with only
 // `folders` still loads.
 
@@ -85,7 +85,7 @@ save_libraries :: proc() {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, "{\n")
 
-	// `folders` first and unchanged in shape: app.py reads this key.
+	// `folders` first and unchanged in shape: legacy/app.py reads this key.
 	strings.write_string(&b, "  \"folders\": [\n")
 	for entry, i in libraries {
 		strings.write_string(&b, "    ")
