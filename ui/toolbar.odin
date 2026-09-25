@@ -149,7 +149,7 @@ draw_topbar :: proc(r: Rect) {
 	gear := rect(edge - px(30), cy, px(30), px(28))
 	audit_rect(gear, "settings")
 	tip(gear, "Settings (models, storage, interface)")
-	if icon_button(gear, .Settings) { app.settings_open = !app.settings_open }
+	if icon_button(gear, .Settings) { if app.settings_open { app.settings_open = false } else { open_settings() } }
 	edge = gear.x - px(4)
 
 	if shows(.Preview) {

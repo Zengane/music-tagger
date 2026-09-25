@@ -200,3 +200,29 @@ the state of the UI overhaul, so any session (cloud or local) can pick it up.
 
 Pull, run `build.bat`, check the title bar says `build <new commit>`, then
 `venv\Scripts\python.exe -m pip install -r requirements.txt`.
+
+### Settings page — done (same day, second part)
+
+`ui/settings.odin`, opened by the gear. Five sections down the left:
+- **General**: interface size, silent scrubbing, reset the top bar, shortcuts.
+- **Library**: include subfolders, rescan, show the library folder.
+- **Models**: Auto/Fast/Balanced/Best, this computer's GPU and RAM and what
+  Auto picks (from `python -m mtag.profiles`), and **every installed model**
+  with what it is for, its size and a button to open its folder. Models are
+  read from the Hugging Face cache (`HF_HUB_CACHE`, `HF_HOME/hub`, or
+  `~/.cache/huggingface/hub`) plus the app's own `model/` folder.
+- **Storage**: every `cache/` folder with its size and file count; the ones
+  that are only pictures/conversions have Clear (asks "Sure?" first).
+- **About**: build stamp, app/logs/python folders, ffmpeg found or not,
+  credits and licences.
+The scans run on a background thread when the page opens. Checked on screen
+under Xvfb; `--selftest`, `--windowcheck`, Windows object and macOS check pass.
+
+### Still to do (next session)
+
+1. Look at, on screen, the big viewer (image zoom, video bar, PDF pages,
+   text), video playback end to end, and the document preview. The code is
+   in and compiles but was not seen working.
+2. README: new layout, keys (B, V, Backspace, F12, right-click the top bar),
+   settings page.
+3. Small: remember the last open folder; `tile_size` pref is unused.

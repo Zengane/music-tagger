@@ -282,6 +282,7 @@ main :: proc() {
 	defer stop_wave_worker()
 	defer stop_thumbnails()
 	defer stop_previews()
+	defer stop_settings_scan()
 	defer stop_search_server()
 	defer stop_warmup()
 
@@ -568,7 +569,7 @@ draw_app :: proc() {
 
 	if app.settings_open {
 		begin_modal()
-		draw_settings(rect(W - px(340) - px(PAD), top.y + top.height + px(6), px(340), px(500)))
+		draw_settings(rect(0, 0, W, H))
 		end_modal()
 	}
 
@@ -747,136 +748,6 @@ accept_suggestion :: proc(tag: string, op: Chip_Op) {
 	field_set(&app.query, text[:last_token_start(text)])
 	set_search_text(field_string(&app.query))
 	app.suggest_open = false
-}
-
-// ── settings ────────────────────────────────────────────────────────────────
-
-// A popover under the gear. It holds the things you set once and forget:
-// how big the interface is, and what a scan should pick up.
-@(private)
-draw_settings :: proc(r: Rect) {
-	// Clicking anywhere else closes it. Checked before the panel draws so the
-	// panel's own clicks are not swallowed.
-	if ui.clicked && !hovered_raw(r) {
-		app.settings_open = false
-		return
-	}
-
-	rl.DrawRectangleRec({r.x + px(3), r.y + px(4), r.width, r.height}, rl.Color{0, 0, 0, 90})
-	fill_round(r, PANEL_2, 8)
-	outline_round(r, LINE, 8)
-
-	x := r.x + px(PAD + 2)
-	w := r.width - px((PAD + 2) * 2)
-	y := r.y + px(PAD)
-
-	section_label(x, y, "INTERFACE SCALE")
-	y += px(19)
-
-	value := fmt.ctprintf("%.0f%%", ui_scale * 100)
-	vw := text_w(.Regular, value, FS_BODY)
-	draw_text_mid(.Regular, value, x + w - vw, y - px(3), px(20), FS_BODY, TEXT)
-
-	scale_value := ui_scale
-	sl := rect(x, y, w - vw - px(12), px(20))
-	if slider(sl, &scale_value, SCALE_MIN, SCALE_MAX) {
-		// Applied while dragging so the change is visible, but the atlases are
-		// only rebaked when the value actually lands on a new pixel size.
-		set_scale(scale_value)
-	}
-	y += px(26)
-	draw_text(.Regular, "Ctrl and + or - also works. Ctrl 0 resets.", x, y, FS_SMALL, TEXT_FAINT)
-	y += px(24)
-
-	hline(x, y, w)
-	y += px(12)
-
-	section_label(x, y, "WHEN IMPORTING A FOLDER")
-	y += px(20)
-
-	if checkbox(x, y, "Include subfolders", &app.recursive) {
-		prefs.recursive = app.recursive
-		save_prefs()
-	}
-	y += px(24)
-
-	hline(x, y, w)
-	y += px(12)
-
-	section_label(x, y, "BROWSING")
-	y += px(20)
-
-	if checkbox(x, y, "Scrubbing is silent", &prefs.scrub_silent) {
-		save_prefs()
-	}
-	y += px(20)
-	draw_text(.Regular, "Left drag on the waveform stays quiet, then plays", x, y, FS_SMALL, TEXT_FAINT)
-	y += px(15)
-	draw_text(.Regular, "from where you let go.", x, y, FS_SMALL, TEXT_FAINT)
-	y += px(22)
-
-	hline(x, y, w)
-	y += px(12)
-
-	// Speed against accuracy, for every analysis. Auto asks the hardware.
-	section_label(x, y, "ANALYSIS MODELS")
-	y += px(20)
-	{
-		options := [4]struct{p: Model_Profile, label: cstring}{
-			{.Auto, "Auto"}, {.Fast, "Fast"}, {.Balanced, "Balanced"}, {.Best, "Best"},
-		}
-		cell_w := (w - px(6) * 3) / 4
-		for option, i in options {
-			cell := rect(x + (cell_w + px(6)) * f32(i), y, cell_w, px(26))
-			on := prefs.model_profile == option.p
-			fill_round(cell, on ? ACCENT_DK : PANEL, 4)
-			outline_round(cell, on ? ACCENT : LINE, 4)
-			lw := text_w(.Regular, option.label, FS_SMALL)
-			draw_text_mid(.Regular, option.label, cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
-			              FS_SMALL, on ? TEXT : TEXT_DIM)
-			if hovered(cell) { ui.hover_cursor = .POINTING_HAND }
-			if clicked_in(cell) && !on {
-				prefs.model_profile = option.p
-				apply_model_profile()
-				save_prefs()
-				// The search server holds the old models; the next search
-				// starts it again with the new ones.
-				restart_search_server()
-				toast(fmt.tprintf("%s models from the next analysis on", option.label))
-			}
-		}
-		y += px(32)
-		hint: cstring
-		switch prefs.model_profile {
-		case .Auto:     hint = "Picked from this computer's GPU and memory."
-		case .Fast:     hint = "Any computer. The CPU is enough."
-		case .Balanced: hint = "A GPU with 4 GB, or an Apple Silicon Mac."
-		case .Best:     hint = "A GPU with 8 GB or more. Slowest, most accurate."
-		}
-		draw_text(.Regular, hint, x, y, FS_SMALL, TEXT_FAINT)
-		y += px(24)
-	}
-
-	y += px(4)
-	draw_text(.Regular, "Sound effects are always imported.", x, y, FS_SMALL, TEXT_FAINT)
-	y += px(17)
-	draw_text(.Regular, "Use the Music / Effects switch to separate them.", x, y, FS_SMALL, TEXT_FAINT)
-	y += px(28)
-
-	if button(rect(x, y, w, px(28)), "Keyboard shortcuts  (F1)", .Ghost) {
-		app.shortcuts_open = true
-		app.settings_open  = false
-		return
-	}
-	y += px(36)
-
-	if lib.root != "" {
-		b := rect(x, y, w, px(28))
-		if button(b, "Rescan this folder") {
-			start_scan(lib.root, app.recursive, app.include_sfx)
-			app.settings_open = false
-		}
-	}
 }
 
 // The tags of a group worth showing: those on at least one track, plus any the
