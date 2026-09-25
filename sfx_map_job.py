@@ -195,6 +195,9 @@ def reduce_to_plane_sfx(vectors):
 
 
 def main():
+    # UTF-8 output, and background priority when the app started this job.
+    from mtag import console
+    console.init()
     ap=argparse.ArgumentParser()
     ap.add_argument("--paths-from",required=True)
     ap.add_argument("--out",required=True)

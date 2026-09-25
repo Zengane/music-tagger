@@ -18,6 +18,9 @@ import torch
 
 from . import audio as A
 
+from . import console as _console
+
+_console.calm_torch()
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 

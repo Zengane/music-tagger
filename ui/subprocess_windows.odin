@@ -17,6 +17,8 @@ package musictagger
 import "core:strings"
 import win32 "core:sys/windows"
 
+@(private) BELOW_NORMAL_PRIORITY_CLASS :: 0x00004000
+
 Stream :: struct {
 	process:    win32.HANDLE,
 	read_pipe:  win32.HANDLE,
@@ -119,7 +121,9 @@ stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> 
 	info: win32.PROCESS_INFORMATION
 	spawned := win32.CreateProcessW(
 		nil, cmd_w, nil, nil, true,
-		win32.CREATE_NO_WINDOW | win32.CREATE_UNICODE_ENVIRONMENT,
+		// Below normal: analysis, waveforms and thumbnails all run while you
+		// work, and the desktop and the program you edit in come first.
+		win32.CREATE_NO_WINDOW | win32.CREATE_UNICODE_ENVIRONMENT | BELOW_NORMAL_PRIORITY_CLASS,
 		nil, dir_w, &startup, &info,
 	)
 

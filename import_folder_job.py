@@ -119,6 +119,9 @@ def import_folder(source, library, effects=False, carry_cache=True):
 
 
 def main():
+    # UTF-8 output, and background priority when the app started this job.
+    from mtag import console
+    console.init()
     ap = argparse.ArgumentParser()
     ap.add_argument('--source', required=True)
     ap.add_argument('--library', required=True)

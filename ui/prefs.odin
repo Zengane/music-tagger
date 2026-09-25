@@ -47,6 +47,9 @@ model_profile_key :: proc(p: Model_Profile) -> string {
 // Every job the app starts inherits this. Set at start-up and on every change.
 apply_model_profile :: proc() {
 	os.set_env("MUSICTAGGER_PROFILE", model_profile_key(prefs.model_profile))
+	// Jobs started by the app lower their own priority and use half the
+	// cores (mtag/console.py). Run from a terminal, they keep full speed.
+	os.set_env("MUSICTAGGER_BACKGROUND", "1")
 }
 
 prefs: Prefs = {

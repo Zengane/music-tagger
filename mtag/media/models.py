@@ -48,6 +48,10 @@ def space_name(model_id: str) -> str:
 def device() -> str:
     import torch
 
+    from ..console import calm_torch
+
+    calm_torch()
+
     if torch.cuda.is_available():
         return "cuda"
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():

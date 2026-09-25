@@ -79,6 +79,9 @@ def apply(data):
 
 
 def main():
+    # UTF-8 output, and background priority when the app started this job.
+    from mtag import console
+    console.init()
     ap = argparse.ArgumentParser()
     ap.add_argument('--path')
     ap.add_argument('--plan', required=True)

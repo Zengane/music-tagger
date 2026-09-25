@@ -200,6 +200,9 @@ def reduce_to_plane(X: np.ndarray, seed: int = 0) -> np.ndarray:
 
 
 def main() -> int:
+    # UTF-8 output, and background priority when the app started this job.
+    from mtag import console
+    console.init()
     ap = argparse.ArgumentParser()
     ap.add_argument("--library", help="folder to walk for audio files")
     ap.add_argument("--paths-from", help="UTF-8 file with one audio path per line")
