@@ -1,8 +1,16 @@
 @echo off
+:: Double-clicked, a batch file's window closes the moment anything goes wrong,
+:: taking the error with it. So it runs itself again inside a window that
+:: stays open.
+if not defined MT_BUILD_INNER (
+    set "MT_BUILD_INNER=1"
+    cmd /k "%~f0"
+    exit /b
+)
 cd /d "%~dp0"
 title Build Music Tagger
 
-:: Builds the native front end. The Python side is not compiled ??? tag_job.py is
+:: Builds the native front end. The Python side is not compiled: tag_job.py is
 :: launched from the venv when you press Analyze and is read from source, so a
 :: change there needs no rebuild.
 
@@ -39,19 +47,10 @@ if not errorlevel 1 (
     pause & exit /b 1
 )
 
-:: Which commit this is, shown in the title bar and in Settings, About. git
-:: is used when it is on PATH; GitHub Desktop does not put it there, so the
-:: commit is otherwise read straight out of the .git folder.
+:: Which commit this is, shown in the title bar and in Settings, About.
+:: Read by a small Python script, because GitHub Desktop keeps git off PATH.
 set "BUILD_ID=unknown"
-for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set "BUILD_ID=%%i"
-set "GITHEAD="
-set "GITREF="
-if "%BUILD_ID%"=="unknown" if exist ".git\HEAD" set /p GITHEAD=<".git\HEAD"
-if defined GITHEAD if "%GITHEAD:~0,5%"=="ref: " set "GITREF=%GITHEAD:~5%"
-if defined GITHEAD if not "%GITHEAD:~0,5%"=="ref: " set "BUILD_ID=%GITHEAD%"
-if defined GITREF if exist ".git\%GITREF:/=\%" set /p BUILD_ID=<".git\%GITREF:/=\%"
-if defined GITREF if "%BUILD_ID%"=="unknown" if exist ".git\packed-refs" for /f "tokens=1" %%a in ('findstr /e /c:" %GITREF%" ".git\packed-refs"') do set "BUILD_ID=%%a"
-if not "%BUILD_ID%"=="unknown" set "BUILD_ID=%BUILD_ID:~0,7%"
+if exist "venv\Scripts\python.exe" for /f "delims=" %%i in ('venv\Scripts\python.exe ui\build_id.py') do set "BUILD_ID=%%i"
 
 echo Building MusicTagger.exe (build %BUILD_ID%)...
 :: -subsystem:windows keeps a console from opening behind the window.
