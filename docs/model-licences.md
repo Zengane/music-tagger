@@ -34,6 +34,20 @@ they are not OSI-approved and carry conditions.
 | [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) | MIT | Yes | small build: text search, document kinds | 2026-09-24 ¹ |
 | [intfloat/multilingual-e5-base](https://huggingface.co/intfloat/multilingual-e5-base) | MIT | Yes | large build: same | 2026-09-24 ¹ |
 
+### Sound search, effects and music candidates (added 2026-09-25)
+
+| Model | Licence | Sellable | Used for | Checked |
+|---|---|---|---|---|
+| [facebook/pe-av-small](https://huggingface.co/facebook/pe-av-small) | Apache-2.0 | Yes | Balanced: sound search, zero-shot effect tags, effects map; music bakeoff candidate | 2026-09-25 ² |
+| [facebook/pe-av-base](https://huggingface.co/facebook/pe-av-base) | Apache-2.0 | Yes | music bakeoff candidate | 2026-09-25 ² |
+| [facebook/pe-av-large](https://huggingface.co/facebook/pe-av-large) | Apache-2.0 | Yes | Best: as small | 2026-09-25 ² |
+| [mispeech/ced-*](https://github.com/RicherMans/CED) | card says Apache-2.0; code GPL-3.0 | **Unclear** | **not used**; see docs/audio-models.md | 2026-09-25 |
+| [mispeech/GLAP](https://huggingface.co/mispeech/GLAP) | not stated where checked | **Unknown** | not used | 2026-09-25 |
+
+² From Meta's perception_models repository (Apache-2.0 badge for the PE
+family) and search results quoting the model cards. The per-checkpoint cards
+were not readable from the build environment; read them before a release.
+
 ¹ Hugging Face could not be reached from the environment this was built in.
 SigLIP 2 and Florence-2 were confirmed through search results quoting the model
 cards; the `florence-community` weights are Microsoft's MIT weights re-uploaded
@@ -67,6 +81,7 @@ The effects side is already clean.
 | trimesh | MIT | Loads 3D models. Rendering is our own numpy code, no GL library. |
 | sentencepiece, protobuf | Apache-2.0, BSD-3 | Tokenizers for SigLIP 2 and E5. |
 | resvg-py (optional) | MIT wrapper; resvg MPL-2.0 | SVG. Not installed by default. |
+| timm | Apache-2.0 | Needed to load PE-AV's checkpoints (their video tower is built on it). |
 | pillow-heif | BSD-3 wrapper, but bundles LGPL/GPL codecs | **Not used**, for that reason. |
 | Blender (optional, external) | GPL | Called as a separate program to convert .fbx/.blend/USD, never bundled. |
 

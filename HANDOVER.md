@@ -98,3 +98,26 @@ Branch `claude/kind-allen-v29vjx`. Full list and open items: `docs/audit.md`.
    and §2 (which side of the three stale tests is right).
 
 Nothing was tested with a GPU, on Windows, or on a Mac in this session.
+
+## 6. Session 2026-09-25 (cloud, Linux)
+
+- **Profiles** (`mtag/profiles.py`): Fast / Balanced / Best / Auto; in the app
+  under Settings → Analysis models; `python -m mtag.profiles` for the installer.
+- **PE-AV** (Apache-2.0) for sound search, zero-shot effect categories and the
+  effects map on Balanced/Best. Music: `train.py --encoder
+  fusion:clap-music+pe-av-base` to measure a MuQ replacement.
+  Research and how to measure: `docs/audio-models.md`.
+- Old browser UI moved to `legacy/`.
+- Fixed: most settings never saved; Linux children not seeing app-set
+  environment variables; non-ASCII search queries on Windows; video lengths.
+- Stale tests brought in line with decided behaviour; `--selftest` passes in
+  full on a sample library.
+
+### What the owner does next
+
+1. Pull, `build.bat`, then `venv\Scripts\python.exe -m pip install -r
+   requirements.txt` (new: timm, and the packages from 2026-09-24).
+2. Run the tests (list in README). `tests.py` fails "torch sees the GPU" only
+   when torch is a CPU build — on your PC it should pass.
+3. Try the app on a mixed folder; leave Settings → Analysis models on Auto.
+4. When there is time: the measurements in `docs/audio-models.md` §4 and §5.

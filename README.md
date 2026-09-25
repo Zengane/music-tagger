@@ -62,9 +62,9 @@ macOS 14 or newer: PyTorch no longer supports Intel Macs.
   **C: drive**, wherever you installed the app. Check you have room.
 - A CUDA GPU makes tagging roughly forty times faster. It works on the CPU;
   it is just slow. Apple Silicon Macs use their own GPU for the image models.
-- Two model sizes for images, video and documents: `small` (default, usable
-  on a CPU) and `large` (more accurate, wants a GPU). Set
-  `MUSICTAGGER_MODEL_SIZE=large` to use the large one.
+- **Speed or accuracy:** Settings → Analysis models → Fast, Balanced, Best, or
+  Auto (the default, picked from your GPU and memory). It decides the image,
+  caption, text and sound-search models; see `docs/audio-models.md`.
 
 If something does not work, run `diagnose.bat` / `./diagnose.sh` and read
 `diagnose.txt`. The app also writes `logs/musictagger.log` on every run.
