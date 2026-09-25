@@ -53,6 +53,14 @@ load_library_snapshot :: proc(root: string) -> bool {
 	for t in s.tracks {
 		copy := clone_track(t, alloc)
 		copy.saved = false
+		// Only audio has waveform measurements; a non-audio file keeps a
+		// length only if its analysis gave it one (older builds read one
+		// from a stale waveform entry: a 3 s clip showed 2:00).
+		if copy.kind != .Audio {
+			copy.features = {}
+			if !copy.scored { copy.duration = 0 }
+		}
+		copy.thumb_state = 0
 		append(&lib.tracks, copy)
 	}
 	clear_imported_folders()

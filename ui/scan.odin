@@ -387,7 +387,10 @@ merge_scan_result :: proc() {
                 t.scored = copy.scored
                 t.scores = copy.scores
                 t.saved = copy.saved
-                if !t.features.valid { t.features = copy.features; t.duration = copy.duration }
+                if !t.features.valid && t.kind == .Audio { t.features = copy.features; t.duration = copy.duration }
+                // A picture or video keeps a length only if its analysis gave it one;
+                // older builds read one from a stale waveform entry.
+                if t.kind != .Audio && copy.scored { t.duration = copy.duration }
             }
         }
         append(&unique, t)

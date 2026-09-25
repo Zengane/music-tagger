@@ -1759,11 +1759,32 @@ draw_tag_editor :: proc(screen: Rect) {
 		draw_text(.Regular, hint, x, y, FS_SMALL, TEXT_FAINT)
 		y += px(22)
 
-		field := rect(x, y, inner, px(34))
+		// A folder can be typed, or picked with the system's own dialog.
+		wants_folder := app.editor_mode == .Add_Library || app.editor_mode == .Add_Folder ||
+		                app.editor_mode == .Relocate_Library
+		field_w := wants_folder ? inner - px(104) : inner
+		field := rect(x, y, field_w, px(34))
 		fill_round(field, PANEL)
 		outline_round(field, ui.focus == rawptr(&app.editor_field) ? ACCENT : LINE)
-		if text_field(&app.editor_field, field, "tag name", px(10)) {
+		placeholder: cstring = "tag name"
+		switch app.editor_mode {
+		case .Add_Library, .Add_Folder, .Relocate_Library: placeholder = "folder path"
+		case .Rename_Library: placeholder = "library name"
+		case .New_Group:      placeholder = "group name"
+		case .Edit_Marker:    placeholder = "marker name"
+		case .New_Tag, .Rename, .Confirm_Delete, .Confirm_Track_Delete, .Edit_Game, .Set_Game, .Set_Color, .Confirm_Filing:
+		}
+		if text_field(&app.editor_field, field, placeholder, px(10)) {
 			app.editor_error = ""
+		}
+		if wants_folder {
+			browse := rect(x + field_w + px(8), y, px(96), px(34))
+			if button(browse, "Browse…") {
+				if picked, ok := choose_folder("Choose a folder", context.temp_allocator); ok {
+					field_set(&app.editor_field, picked)
+					app.editor_error = ""
+				}
+			}
 		}
 		y += px(42)
 

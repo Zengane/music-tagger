@@ -282,3 +282,40 @@ reveal_in_file_manager :: proc(path: string) {
 		if started { stream_close(&s) } else { toast("could not open the file manager") }
 	}
 }
+
+// ── choosing a folder ───────────────────────────────────────────────────────
+
+// The system's folder picker: Finder's on macOS; zenity (GNOME and most
+// others) or kdialog (KDE) on Linux. Blocks until it closes. ok = false when
+// cancelled or when no picker is installed; the path can still be typed.
+choose_folder :: proc(title: string, allocator := context.allocator) -> (path: string, ok: bool) {
+	out: []byte
+	code: u32
+	ran: bool
+	when ODIN_OS == .Darwin {
+		// The title goes in as an argument, never spliced into the script.
+		script := `on run argv
+			return POSIX path of (choose folder with prompt (item 1 of argv))
+		end run`
+		out, code, ran = run_capture({"osascript", "-e", script, title}, context.temp_allocator)
+	} else {
+		out, code, ran = run_capture({"zenity", "--file-selection", "--directory", fmt.tprintf("--title=%s", title)}, context.temp_allocator)
+		if !ran || code == 127 {
+			home := os.get_env("HOME", context.temp_allocator)
+			out, code, ran = run_capture({"kdialog", "--title", title, "--getexistingdirectory", home}, context.temp_allocator)
+		}
+	}
+	ui.held     = false
+	ui.captured = nil
+	if !ran || code != 0 { return "", false }
+	// The helpers' warnings come down the same pipe (GTK and libEGL are
+	// chatty), so the answer is the last line that is really a folder.
+	lines := strings.split_lines(string(out), context.temp_allocator)
+	for i := len(lines) - 1; i >= 0; i -= 1 {
+		text := strings.trim_space(lines[i])
+		// Finder answers with a trailing slash.
+		if len(text) > 1 && strings.has_suffix(text, "/") { text = text[:len(text) - 1] }
+		if text != "" && os.is_dir(text) { return strings.clone(text, allocator), true }
+	}
+	return "", false
+}
