@@ -78,6 +78,21 @@ PROFILES: dict[str, Profile] = {
     ),
 }
 
+# The cache folder each sound-and-text model writes to. Kept here, not only on
+# the encoder classes, so a job that finds everything cached can name the
+# folder without importing torch (see tests_sfx_map.py).
+AUDIO_TEXT_SPACE = {
+    CLAP_GENERAL: "clap-sfx-v1",
+    "facebook/pe-av-small": "pe-av-small",
+    "facebook/pe-av-base": "pe-av-base",
+    "facebook/pe-av-large": "pe-av-large",
+}
+
+
+def audio_text_space(profile: "Profile | None" = None) -> str:
+    return AUDIO_TEXT_SPACE[(profile or current()).audio_text]
+
+
 # Names used before profiles existed.
 _ALIASES = {"small": "balanced", "large": "best"}
 
@@ -127,8 +142,38 @@ def detect() -> Hardware:
 
 
 def _detect() -> Hardware:
+    """Without importing torch where it can be helped: that takes seconds,
+    and a job that finds everything cached should not pay it."""
     hw = Hardware(ram_gb=round(_ram_gb(), 1), cpus=os.cpu_count() or 0,
                   system=f"{platform.system()} {platform.machine()}")
+
+    if sys.platform == "darwin":
+        if platform.machine() == "arm64":
+            # Apple Silicon shares memory between CPU and GPU.
+            hw.device, hw.gpu, hw.vram_gb = "mps", "Apple GPU", hw.ram_gb
+        return hw
+
+    import shutil
+    import subprocess
+
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+            out = subprocess.run([smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=10, **kw)
+            first = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else ""
+            if first:
+                name, mem = [x.strip() for x in first.rsplit(",", 1)]
+                hw.device, hw.gpu, hw.vram_gb = "cuda", name, round(float(mem) / 1024, 1)
+                return hw
+        except Exception:
+            pass
+
+    # No nvidia-smi means no NVIDIA driver, so no CUDA. AMD cards (ROCm)
+    # answer to torch's CUDA API too; only then is torch worth asking.
+    if not shutil.which("rocm-smi"):
+        return hw
     try:
         import torch
 
@@ -136,9 +181,6 @@ def _detect() -> Hardware:
             props = torch.cuda.get_device_properties(0)
             hw.device, hw.gpu = "cuda", props.name
             hw.vram_gb = round(props.total_memory / 2**30, 1)
-        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            # Apple Silicon shares memory between CPU and GPU.
-            hw.device, hw.gpu, hw.vram_gb = "mps", "Apple GPU", hw.ram_gb
     except Exception:
         pass
     return hw

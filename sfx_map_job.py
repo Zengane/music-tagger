@@ -19,8 +19,11 @@ def _encoder():
 
 
 def load_vectors(paths):
-    probe = _encoder()
-    cache = EmbeddingCache(probe.name)
+    # Named without importing the encoders: a fully cached map never loads
+    # torch at all.
+    from mtag.profiles import audio_text_space
+
+    cache = EmbeddingCache(audio_text_space())
     encoder = None
     ready, vectors = [], []
     try:
@@ -30,8 +33,8 @@ def load_vectors(paths):
                 except (OSError, ValueError): vector = None
                 if vector is None:
                     if encoder is None:
-                        emit(event="step",detail=f"Loading the sound model {probe.MODEL_ID} (first use downloads it)")
-                        encoder = probe
+                        encoder = _encoder()
+                        emit(event="step",detail=f"Loading the sound model {encoder.MODEL_ID} (first use downloads it)")
                         encoder.load()
                     vector = encoder.embed_file(path)
                     cache.put(path,vector)
@@ -206,7 +209,8 @@ def main():
     emit(event="step",detail="Naming the regions")
     regions=concept_regions(ready,vectors,plane)
     emit(event="step",detail=f"{len(regions)} regions named")
-    data={"version":1,"encoder":_encoder().name,
+    from mtag.profiles import audio_text_space
+    data={"version":1,"encoder":audio_text_space(),
           "points":{str(p):xy.tolist() for p,xy in zip(ready,plane)},
           "regions":regions}
     tmp=out.with_suffix(".tmp")
