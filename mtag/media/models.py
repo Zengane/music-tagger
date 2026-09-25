@@ -11,11 +11,10 @@
 Every licence was checked before wiring the model in; see
 docs/model-licences.md. Nothing non-commercial is used here.
 
-Two builds, as the roadmap promised: `small` is CPU-usable, `large` wants a
-GPU and is more accurate. Choose with MUSICTAGGER_MODEL_SIZE=small|large, or
-with prefs. Embeddings from the two are not comparable, so every cache is
-namespaced by the model that made it — a user who switches builds gets fresh
-vectors, never a silently mixed map.
+Which size of each model is used is decided by the profile (fast, balanced
+or best; see mtag/profiles.py). Embeddings from two models are not
+comparable, so every cache is namespaced by the model that made it — a user
+who switches profile gets fresh vectors, never a silently mixed map.
 
 All three stay resident for a job. At fp16 the small set is about 1.5 GB of
 VRAM and the large about 4.5 GB, well inside an 8 GB card, so there is no need
@@ -30,33 +29,15 @@ from dataclasses import dataclass
 import numpy as np
 
 
-@dataclass(frozen=True)
-class Build:
-    name: str
-    siglip: str
-    florence: str
-    text: str
+def current_build():
+    """The models in force for this run; see mtag/profiles.py."""
+    from ..profiles import current
 
-
-BUILDS = {
-    "small": Build("small",
-                   siglip="google/siglip2-base-patch16-256",
-                   florence="florence-community/Florence-2-base",
-                   text="intfloat/multilingual-e5-small"),
-    "large": Build("large",
-                   siglip="google/siglip2-so400m-patch16-384",
-                   florence="florence-community/Florence-2-large",
-                   text="intfloat/multilingual-e5-base"),
-}
+    return current()
 
 
 def build_name() -> str:
-    name = os.environ.get("MUSICTAGGER_MODEL_SIZE", "").strip().lower()
-    return name if name in BUILDS else "small"
-
-
-def current_build() -> Build:
-    return BUILDS[build_name()]
+    return current_build().name
 
 
 def space_name(model_id: str) -> str:

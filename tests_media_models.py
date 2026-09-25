@@ -85,6 +85,81 @@ def build_tiny_models(out: Path) -> None:
     Florence2Processor(image_processor=ip, tokenizer=bt).save_pretrained(out / "florence")
 
 
+def build_tiny_pe_audio(out: Path) -> None:
+    """A PE Audio model the size of a postage stamp, saved like a checkpoint."""
+    from transformers import PeAudioConfig, PeAudioModel, PeAudioProcessor, PreTrainedTokenizerFast
+    from transformers.models.pe_audio.feature_extraction_pe_audio import PeAudioFeatureExtractor
+
+    cfg = PeAudioConfig(
+        text_config=dict(model_type="modernbert", vocab_size=500, hidden_size=32, intermediate_size=64,
+                         num_hidden_layers=2, num_attention_heads=2, pad_token_id=1, bos_token_id=0,
+                         eos_token_id=2, cls_token_id=0, sep_token_id=2),
+        audio_config=dict(hidden_size=32, intermediate_size=64, num_hidden_layers=1, num_attention_heads=2,
+                          head_dim=16, dac_config=dict(encoder_hidden_size=8, codebook_dim=16)))
+    PeAudioModel(cfg).save_pretrained(out)
+    tok = PreTrainedTokenizerFast(tokenizer_object=_bpe(), pad_token="<pad>", unk_token="<unk>", cls_token="<s>")
+    PeAudioProcessor(feature_extractor=PeAudioFeatureExtractor(), tokenizer=tok).save_pretrained(out)
+
+
+@unittest.skipUnless(HAVE_TORCH and shutil.which("ffmpeg"), "needs torch, transformers and ffmpeg")
+class SoundModelPlumbing(unittest.TestCase):
+    """PE-AV: the sound search model of the balanced and best profiles."""
+
+    @classmethod
+    def setUpClass(cls):
+        import mtag.encoders as E
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+        build_tiny_pe_audio(root / "pe")
+        cls.Tiny = type("TinyPe", (E.PeAvEncoder,), {"name": "tiny-pe", "MODEL_ID": str(root / "pe")})
+        cls.enc = cls.Tiny()
+        cls.enc.load()
+        cls.wav = root / "tone.wav"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=300:duration=23",
+                        str(cls.wav)], check=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_windows_pool_and_text(self):
+        w = self.enc.embed_windows_file(self.wav)
+        self.assertEqual(w.shape[0], 2)  # 23 s in 10 s windows
+        v = self.enc.embed_file(self.wav)
+        self.assertEqual(v.shape[0], w.shape[1] * 2)  # mean + std
+        self.assertAlmostEqual(float(np.linalg.norm(v)), 1.0, places=4)
+        t = self.enc.embed_text(["an explosion", "a door"])
+        np.testing.assert_allclose(np.linalg.norm(t, axis=1), 1, atol=1e-4)
+        p = self.enc.probabilities(w.mean(0, keepdims=True), self.enc.embed_text(["x"], raw=True))
+        self.assertTrue(0 < float(p[0, 0]) < 1)
+
+    def test_every_effect_category_has_prompts(self):
+        from mtag import sfxtax
+
+        for group, tags in sfxtax.SFX_GROUPS:
+            if group in ("SFX Intent", "SFX Length"):
+                continue
+            for tag in tags:
+                self.assertIn(tag, sfxtax.SFX_PROMPTS, f"{group}: {tag}")
+
+    def test_in_a_fusion(self):
+        import mtag.encoders as E
+
+        E.ENCODERS["tiny-pe"] = self.Tiny
+        try:
+            f = E.get_encoder("fusion:tiny-pe")
+            v = f.embed_file(self.wav)
+            self.assertEqual(f.text_slice(v.shape[0]), (0, v.shape[0] // 2))
+            self.assertEqual(f.embed_text(["a riser"]).shape[0], 1)
+        finally:
+            del E.ENCODERS["tiny-pe"]
+            import mtag.dataset as DS
+
+            shutil.rmtree(DS.CACHE_ROOT / "tiny-pe", ignore_errors=True)
+            shutil.rmtree(DS.CACHE_ROOT / "fusion_tiny-pe", ignore_errors=True)
+
+
 @unittest.skipUnless(HAVE_TORCH and shutil.which("ffmpeg"), "needs torch, transformers and ffmpeg")
 class ModelPlumbing(unittest.TestCase):
     @classmethod

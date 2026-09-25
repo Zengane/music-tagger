@@ -38,11 +38,13 @@ from . import vocab as V
 RESULT_VERSION = 1
 
 
-def ui_key(path: Path) -> str:
+def ui_key(path) -> str:
     """The front end's cache key for a file: FNV-1a over the path as given,
     then size and mtime in nanoseconds, little-endian. Mirrors hash_key in
     ui/audio.odin, so thumbnails written here are found there by name."""
-    st = path.stat()
+    # Hashed exactly as the app sent it: Path() would tidy the separators and
+    # the app, which hashes its own string, would not find the thumbnail.
+    st = Path(path).stat()
     h = 0xCBF29CE484222325
     data = str(path).encode("utf-8") + int(st.st_size).to_bytes(8, "little", signed=True) \
         + int(st.st_mtime_ns).to_bytes(8, "little", signed=True)
@@ -51,7 +53,7 @@ def ui_key(path: Path) -> str:
     return f"{h:016x}"
 
 
-def thumb_path(path: Path) -> Path:
+def thumb_path(path) -> Path:
     return CACHE_ROOT / "thumbs" / f"{ui_key(path)}.png"
 
 
@@ -127,7 +129,7 @@ def _vec_dir(space: str) -> Path:
     return CACHE_ROOT / space
 
 
-def load_cached(path: Path, models: Models) -> Result | None:
+def load_cached(path: Path, models: Models, raw: str | None = None) -> Result | None:
     p = _result_dir(models.build) / f"{_key(path)}.json"
     if not p.exists():
         return None
@@ -142,7 +144,7 @@ def load_cached(path: Path, models: Models) -> Result | None:
     for name in ("siglip", "florence", "text"):
         if getattr(models, name) is not None and not have.get(name):
             return None
-    r = Result(path=str(path), kind=doc["kind"], caption=doc.get("caption", ""), ocr=doc.get("ocr", ""),
+    r = Result(path=raw if raw is not None else str(path), kind=doc["kind"], caption=doc.get("caption", ""), ocr=doc.get("ocr", ""),
                text_excerpt=doc.get("excerpt", ""), metrics=doc.get("metrics", {}),
                thumb=doc.get("thumb", ""), notes=doc.get("notes", []))
     r.scores = {t: tuple(v) for t, v in doc.get("scores", {}).items()}
@@ -287,7 +289,7 @@ def description_text(path: Path, r: Result) -> str:
 
 # ── the batch ───────────────────────────────────────────────────────────────
 
-def analyse_batch(paths: list[Path], models: Models, bank: PromptBank, on_error=None,
+def analyse_batch(paths: list, models: Models, bank: PromptBank, on_error=None,
                   use_cache: bool = True) -> list[Result]:
     """Analyse a batch; files that fail are reported through `on_error` and
     left out. Model calls are batched across the files."""
@@ -296,16 +298,20 @@ def analyse_batch(paths: list[Path], models: Models, bank: PromptBank, on_error=
     measured: list[M.Measured | None] = []
     todo_idx: list[int] = []
 
-    for path in paths:
+    for item in paths:
+        # Paths are reported back exactly as they were given, so the app can
+        # match them to its own strings byte for byte.
+        raw = item if isinstance(item, str) else str(item)
+        path = Path(raw)
         kind = K.kind_of(path) or ""
         if use_cache:
-            cached = load_cached(path, models)
+            cached = load_cached(path, models, raw)
             if cached is not None:
                 results.append(cached)
                 visuals.append(None)
                 measured.append(None)
                 continue
-        r = Result(path=str(path), kind=kind)
+        r = Result(path=raw, kind=kind)
         try:
             v = D.load_visual(path, kind) if kind != K.AUDIO else D.Visual()
             m = M.measure(v, kind)
@@ -322,12 +328,12 @@ def analyse_batch(paths: list[Path], models: Models, bank: PromptBank, on_error=
             for tag, score in m.tags.items():
                 r.scores[tag] = (score, M.MEASURED_THRESHOLD, False)
             if v.frames:
-                tp = thumb_path(path)
+                tp = thumb_path(raw)
                 D.thumbnail_png(v.frames[_caption_frame(v, m)], tp)
                 r.thumb = str(tp)
         except Exception as e:
             if on_error:
-                on_error(path, str(e))
+                on_error(raw, str(e))
             results.append(None)
             visuals.append(None)
             measured.append(None)

@@ -48,6 +48,11 @@ MODEL_ID = "MIT/ast-finetuned-audioset-10-10-0.4593"
 SCORE_FLOOR = 0.10
 TOP_K = 12
 
+# Zero-shot scores from the sound search model are scaled down so that, until
+# they have been measured on a real library, they only reach the applying
+# threshold (0.35) when the model is very sure.
+ZS_WEIGHT = 0.5
+
 
 def emit(**payload) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -63,26 +68,23 @@ def device_name() -> str:
         return "unknown"
 
 
-def measure_length(path: Path) -> tuple[list[str], float]:
+def measure_length(samples, sr: int) -> tuple[list[str], float]:
     """One-Shot, Loop or Tail, from the audio itself.
 
     A loop is made to be butt-joined, so its first and last moments are at a
     similar level. A one-shot decays to silence. Anything long that does
     neither is left alone rather than mislabelled.
-    """
-    from mtag import audio as A
 
-    try:
-        samples = A.decode(path, sr=8000)
-    except Exception:
-        return [], 0.0
-    if samples.size == 0:
+    Takes the samples the tagger already decoded: this used to decode every
+    file a second time at 8 kHz just to measure it.
+    """
+    if samples is None or samples.size == 0:
         return [], 0.0
 
     import numpy as np
 
-    duration = samples.size / 8000
-    window = max(int(0.05 * 8000), 1)
+    duration = samples.size / sr
+    window = max(int(0.05 * sr), 1)
     head = float(np.abs(samples[:window]).mean())
     tail = float(np.abs(samples[-window:]).mean())
     peak = float(np.abs(samples).max()) or 1.0
@@ -135,6 +137,35 @@ def main() -> int:
                  message=f"no AudioSet model ({e}); using filenames and length only")
             model = None
 
+    # The profile's sound-and-text model (mtag/profiles.py). With PE-AV it
+    # also answers "is this a riser? metal? outdoors?" directly, in the
+    # effects' own words; with either it stores a vector per file, which is
+    # what search by description and the effects map read.
+    zs = None
+    zs_tags: list[str] = []
+    zs_text = None
+    if not args.no_model:
+        try:
+            from mtag.dataset import EmbeddingCache
+            from mtag.encoders import audio_text_encoder
+
+            zs = audio_text_encoder()
+            emit(event="loading", detail=f"loading the sound search model ({zs.MODEL_ID})")
+            zs.load()
+            zs_cache = EmbeddingCache(zs.name)
+            if hasattr(zs, "probabilities"):
+                phrases, owner = [], []
+                for tag, ps in sfxtax.SFX_PROMPTS.items():
+                    for ph in ps:
+                        phrases.append(ph)
+                        owner.append(tag)
+                zs_tags = owner
+                zs_text = zs.embed_text(phrases, raw=True)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            emit(event="warning", message=f"no sound search model ({e}); tags still work, search by description of effects will not")
+            zs = None
+
     emit(
         event="ready",
         encoder="audioset" if model is not None else "filename+length",
@@ -164,19 +195,26 @@ def main() -> int:
         try:
             scores: dict[str, float] = {}
 
-            length_tags, duration = measure_length(path)
+            from mtag import audio as A
+
+            # One decode, at the rate the AudioSet model wants, serves both it
+            # and the length measurement.
+            try:
+                wave16 = A.decode(path, sr=16000)
+            except Exception:
+                wave16 = None
+            length_tags, duration = measure_length(wave16, 16000)
             for tag in length_tags:
                 scores[tag] = max(scores.get(tag, 0.0), 0.9)
 
-            if model is not None:
+            if model is not None and wave16 is not None:
                 import numpy as np
                 import torch
-                from mtag import audio as A
 
                 # The model wants 16 kHz mono. Effects are short, so the whole
                 # file goes in; anything longer than ten seconds is trimmed,
                 # which is where the useful part of a long ambience is anyway.
-                wave = A.decode(path, sr=16000)
+                wave = wave16
                 if wave.size:
                     wave = wave[: 16000 * 10]
                     inputs = extractor(wave, sampling_rate=16000, return_tensors="pt")
@@ -195,6 +233,26 @@ def main() -> int:
                     for tag, score in sfxtax.tags_for_labels(scored).items():
                         scores[tag] = max(scores.get(tag, 0.0), score)
 
+            zs_scores: dict[str, float] = {}
+            if zs is not None:
+                import numpy as np
+
+                cached = zs_cache.get(path) if zs_text is None else None
+                if cached is None:
+                    windows = zs.embed_windows_file(path)
+                    from mtag.encoders import _pool
+
+                    zs_cache.put(path, _pool(windows))
+                    if zs_text is not None and len(windows):
+                        probs = zs.probabilities(windows.mean(axis=0, keepdims=True), zs_text)[0]
+                        for tag, p in zip(zs_tags, probs):
+                            zs_scores[tag] = max(zs_scores.get(tag, 0.0), float(p))
+                for tag, p in zs_scores.items():
+                    # Suggested, not applied, until measured: the threshold
+                    # below is a starting point (docs/audio-models.md).
+                    scores.setdefault(tag, 0.0)
+                    scores[tag] = max(scores[tag], p * ZS_WEIGHT)
+
             ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
             emit(
                 event="result",
@@ -205,7 +263,9 @@ def main() -> int:
                         "tag": tag,
                         "score": round(score, 4),
                         "threshold": 0.35,
-                        "zero_shot": False,
+                        # Marked in the inspector: a guess from a text
+                        # prompt, not from a trained classifier.
+                        "zero_shot": tag in zs_scores and score <= zs_scores[tag] * ZS_WEIGHT + 1e-9,
                     }
                     for tag, score in ranked
                 ],

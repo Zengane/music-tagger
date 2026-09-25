@@ -114,7 +114,7 @@ def main() -> int:
         emit(event="error", path=str(path), message=message)
 
     for start in range(0, len(paths), CHUNK):
-        chunk = [Path(p) for p in paths[start:start + CHUNK]]
+        chunk = paths[start:start + CHUNK]  # strings, kept exactly as the app wrote them
         emit(event="loading", detail=f"analysing {start + 1}-{start + len(chunk)} of {len(paths)}")
         try:
             results = AN.analyse_batch(chunk, models, bank, on_error=on_error, use_cache=not args.no_cache)

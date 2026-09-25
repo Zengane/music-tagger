@@ -329,15 +329,148 @@ class FusionEncoder(Encoder):
         return None
 
 
+class PeAvEncoder(Encoder):
+    """Meta's Perception Encoder, audio half (PE-AV), Apache-2.0.
+
+    Audio and text in one space, trained on far more audio-text pairs than
+    CLAP, with a sigmoid loss, so its scores can be read as probabilities the
+    way SigLIP's can. Used for search by description, zero-shot effect tags
+    and the effects map, and offered to the bakeoff as a commercial
+    replacement for MuQ in the music fusion.
+
+    The checkpoints are the audio-video model. Only the audio tower and the
+    text tower are kept; the video tower is dropped after loading to give the
+    memory back.
+    """
+
+    name = "pe-av-small"
+    MODEL_ID = "facebook/pe-av-small"
+    has_text = True
+    sr = 48000
+    window_s = 10.0
+    max_windows = 12
+    batch = 8
+
+    def load(self):
+        from transformers import AutoModel, AutoProcessor
+
+        dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
+        model = AutoModel.from_pretrained(self.MODEL_ID, dtype=dtype)
+        if hasattr(model, "audio_model"):
+            audio = model.audio_model
+            for attr in ("video_model", "audio_video_encoder"):
+                if hasattr(model, attr):
+                    delattr(model, attr)
+            del model
+            model = audio
+        self.model = model.to(_DEVICE).eval()
+        proc = AutoProcessor.from_pretrained(self.MODEL_ID)
+        self.feature_extractor = getattr(proc, "feature_extractor", proc)
+        self.tokenizer = getattr(proc, "tokenizer", None)
+        if self.tokenizer is None:
+            from transformers import AutoTokenizer
+
+            self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
+        self.logit_scale = float(self.model.text_audio_logit_scale.detach().float().cpu())
+        self.logit_bias = float(self.model.text_audio_logit_bias.detach().float().cpu())
+
+    def embed_windows(self, wavs):
+        inp = self.feature_extractor([w.float().cpu().numpy() for w in wavs], sampling_rate=self.sr,
+                                     return_tensors="pt")
+        values = inp["input_values"].to(_DEVICE, dtype=self.model.dtype)
+        mask = inp.get("padding_mask")
+        with torch.no_grad():
+            out = self.model.get_audio_embeds(values, mask.to(_DEVICE) if mask is not None else None)
+        return out.float().cpu().numpy()
+
+    def embed_windows_file(self, filepath) -> np.ndarray:
+        """Raw (unpooled, unnormalised) window embeddings: what `probabilities`
+        expects. `embed_file` pools these for the caches."""
+        w = A.windows(filepath, self.sr, self.window_s, self.max_windows)
+        outs = []
+        for i in range(0, w.shape[0], self.batch):
+            outs.append(self.embed_windows(torch.from_numpy(w[i: i + self.batch])))
+        return np.concatenate(outs, axis=0)
+
+    def embed_file(self, filepath) -> np.ndarray:
+        return _pool(self.embed_windows_file(filepath))
+
+    def embed_text(self, texts, raw: bool = False):
+        inp = self.tokenizer(texts, padding=True, truncation=True, max_length=128, return_tensors="pt")
+        inp = {k: v.to(_DEVICE) for k, v in inp.items() if k in ("input_ids", "attention_mask")}
+        with torch.no_grad():
+            # Asked for explicitly: the text tower does not return its hidden
+            # states unless told to, and the head reads the last one.
+            out = self.model.text_model(**inp, output_hidden_states=True, return_dict=True)
+            emb = self.model.text_audio_head(out.hidden_states[-1][:, 0])
+        emb = emb.float().cpu().numpy()
+        if raw:
+            return emb
+        return emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-8)
+
+    def probabilities(self, audio_raw: np.ndarray, text_raw: np.ndarray) -> np.ndarray:
+        """The model's own sigmoid score for (audio, text) pairs, from raw
+        embeddings, exactly as transformers computes its logits."""
+        logits = audio_raw @ text_raw.T * self.logit_scale + self.logit_bias
+        return 1.0 / (1.0 + np.exp(-logits))
+
+
+class PeAvBase(PeAvEncoder):
+    name = "pe-av-base"
+    MODEL_ID = "facebook/pe-av-base"
+
+
+class PeAvLarge(PeAvEncoder):
+    name = "pe-av-large"
+    MODEL_ID = "facebook/pe-av-large"
+    batch = 4
+
+
+class ClapGeneralEncoder(ClapMusicEncoder):
+    """General-audio CLAP, as the effects map has always used. Its cache keeps
+    the map's old name, so nothing already embedded is redone."""
+
+    name = "clap-sfx-v1"
+    MODEL_ID = "laion/clap-htsat-unfused"
+    max_windows = 4
+
+
 ENCODERS = {
     e.name: e
-    for e in (MuQMuLanEncoder, MuQEncoder, MertEncoder, ClapMusicEncoder)
+    for e in (MuQMuLanEncoder, MuQEncoder, MertEncoder, ClapMusicEncoder,
+              PeAvEncoder, PeAvBase, PeAvLarge, ClapGeneralEncoder)
 }
+
+# Model id -> encoder, for the profile's audio_text role.
+BY_MODEL_ID = {e.MODEL_ID: e for e in (PeAvEncoder, PeAvBase, PeAvLarge, ClapGeneralEncoder)}
+
+
+def audio_text_encoder():
+    """The profile's sound-and-text encoder, not yet loaded. Its `name` is
+    also its cache folder."""
+    from .profiles import current
+
+    return BY_MODEL_ID[current().audio_text]()
 
 
 def get_encoder(name: str) -> Encoder:
+    """An encoder by name. "fusion" is the shipped MuQ-MuLan + MuQ + CLAP
+    fusion; "fusion:a+b" fuses any registered encoders, which is how a
+    commercial replacement for MuQ is trained and compared:
+
+        train.py <library> --encoder fusion:clap-music+pe-av-base
+    """
     if name == FusionEncoder.name:
         enc = FusionEncoder()
+        enc.load()
+        return enc
+    if name.startswith(FusionEncoder.name + ":"):
+        parts = tuple(p for p in name.split(":", 1)[1].split("+") if p)
+        unknown = [p for p in parts if p not in ENCODERS]
+        if unknown or not parts:
+            raise KeyError(f"unknown encoder(s) {unknown} in {name!r}; have {sorted(ENCODERS)}")
+        enc = FusionEncoder(parts)
+        enc.name = name
         enc.load()
         return enc
     if name not in ENCODERS:

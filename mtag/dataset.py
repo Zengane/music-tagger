@@ -28,7 +28,10 @@ def _key(filepath: Path) -> str:
 
 class EmbeddingCache:
     def __init__(self, encoder_name: str):
-        self.dir = CACHE_ROOT / encoder_name
+        # "fusion:clap-music+pe-av-base" is a fine encoder name and a bad
+        # folder name on Windows, where ':' is not allowed.
+        safe = encoder_name.replace(":", "_").replace("+", "_")
+        self.dir = CACHE_ROOT / safe
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, filepath: Path) -> np.ndarray | None:

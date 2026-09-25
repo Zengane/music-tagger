@@ -88,7 +88,10 @@ def print_table(all_reports: dict) -> None:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("library")
-    ap.add_argument("--encoders", nargs="+", default=list(ENCODERS))
+    # The music candidates. The general-audio CLAP is for effects and is left
+    # out; name it explicitly to include it.
+    ap.add_argument("--encoders", nargs="+",
+                    default=["muq-mulan", "muq", "mert", "clap-music", "pe-av-small", "pe-av-base"])
     args = ap.parse_args()
 
     reports = run(args.library, args.encoders)

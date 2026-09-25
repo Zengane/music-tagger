@@ -28,6 +28,25 @@ Prefs :: struct {
 	dock_h:       f32,  // how tall the player is, in design units
 	loop:         bool,
 	shuffle:      bool,
+	model_profile: Model_Profile, // speed against accuracy for every job; see mtag/profiles.py
+}
+
+// Which models the jobs use. Auto lets the job look at the hardware.
+Model_Profile :: enum u8 { Auto, Fast, Balanced, Best }
+
+model_profile_key :: proc(p: Model_Profile) -> string {
+	switch p {
+	case .Auto:     return "auto"
+	case .Fast:     return "fast"
+	case .Balanced: return "balanced"
+	case .Best:     return "best"
+	}
+	return "auto"
+}
+
+// Every job the app starts inherits this. Set at start-up and on every change.
+apply_model_profile :: proc() {
+	os.set_env("MUSICTAGGER_PROFILE", model_profile_key(prefs.model_profile))
 }
 
 prefs: Prefs = {
@@ -79,6 +98,9 @@ load_prefs :: proc() {
 	prefs.include_sfx  = json_bool_field(text, "include_sfx",  prefs.include_sfx)
 	prefs.rail_visible   = json_bool_field(text, "rail_visible",   prefs.rail_visible)
 	prefs.inspector_auto = json_bool_field(text, "inspector_auto", prefs.inspector_auto)
+	if v, ok := json_number_field(text, "model_profile"); ok && v >= 0 && v <= f64(max(Model_Profile)) {
+		prefs.model_profile = Model_Profile(int(v))
+	}
 }
 
 save_prefs :: proc() {
@@ -92,6 +114,15 @@ save_prefs :: proc() {
 	fmt.sbprintf(&b, "  \"inspect_w\": %.1f,\n", prefs.inspect_w)
 	fmt.sbprintf(&b, "  \"rail_visible\": %s,\n", prefs.rail_visible ? "true" : "false")
 	fmt.sbprintf(&b, "  \"inspector_auto\": %s,\n", prefs.inspector_auto ? "true" : "false")
+	// These were read at start-up but never written, so every one of them
+	// quietly reset on the next launch.
+	fmt.sbprintf(&b, "  \"folder_view\": %s,\n", prefs.folder_view ? "true" : "false")
+	fmt.sbprintf(&b, "  \"scrub_silent\": %s,\n", prefs.scrub_silent ? "true" : "false")
+	fmt.sbprintf(&b, "  \"hide_tagged\": %s,\n", prefs.hide_tagged ? "true" : "false")
+	fmt.sbprintf(&b, "  \"loop\": %s,\n", prefs.loop ? "true" : "false")
+	fmt.sbprintf(&b, "  \"shuffle\": %s,\n", prefs.shuffle ? "true" : "false")
+	fmt.sbprintf(&b, "  \"dock_h\": %.1f,\n", prefs.dock_h)
+	fmt.sbprintf(&b, "  \"model_profile\": %d,\n", int(prefs.model_profile))
 	fmt.sbprintf(&b, "  \"tile_size\": %.1f\n", prefs.tile_size)
 	fmt.sbprintf(&b, "}}\n")
 	_ = os.write_entire_file(prefs_path(), transmute([]byte)strings.to_string(b))

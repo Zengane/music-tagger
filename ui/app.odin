@@ -240,6 +240,7 @@ main :: proc() {
 	rl.SetExitKey(.KEY_NULL) // Escape clears the search box, it does not quit
 
 	load_prefs()
+	apply_model_profile()
 	ui_scale = prefs.scale > 0 ? clamp(prefs.scale, SCALE_MIN, SCALE_MAX) : auto_scale()
 	app.recursive    = prefs.recursive
 	app.include_sfx  = prefs.include_sfx
@@ -558,7 +559,7 @@ draw_app :: proc() {
 
 	if app.settings_open {
 		begin_modal()
-		draw_settings(rect(W - px(340) - px(PAD), top.height + px(6), px(340), px(440)))
+		draw_settings(rect(W - px(340) - px(PAD), top.height + px(6), px(340), px(530)))
 		end_modal()
 	}
 
@@ -1110,6 +1111,48 @@ draw_settings :: proc(r: Rect) {
 	y += px(15)
 	draw_text(.Regular, "from where you let go.", x, y, FS_SMALL, TEXT_FAINT)
 	y += px(22)
+
+	hline(x, y, w)
+	y += px(12)
+
+	// Speed against accuracy, for every analysis. Auto asks the hardware.
+	section_label(x, y, "ANALYSIS MODELS")
+	y += px(20)
+	{
+		options := [4]struct{p: Model_Profile, label: cstring}{
+			{.Auto, "Auto"}, {.Fast, "Fast"}, {.Balanced, "Balanced"}, {.Best, "Best"},
+		}
+		cell_w := (w - px(6) * 3) / 4
+		for option, i in options {
+			cell := rect(x + (cell_w + px(6)) * f32(i), y, cell_w, px(26))
+			on := prefs.model_profile == option.p
+			fill_round(cell, on ? ACCENT_DK : PANEL, 4)
+			outline_round(cell, on ? ACCENT : LINE, 4)
+			lw := text_w(.Regular, option.label, FS_SMALL)
+			draw_text_mid(.Regular, option.label, cell.x + (cell.width - lw) * 0.5, cell.y, cell.height,
+			              FS_SMALL, on ? TEXT : TEXT_DIM)
+			if hovered(cell) { ui.hover_cursor = .POINTING_HAND }
+			if clicked_in(cell) && !on {
+				prefs.model_profile = option.p
+				apply_model_profile()
+				save_prefs()
+				// The search server holds the old models; the next search
+				// starts it again with the new ones.
+				restart_search_server()
+				toast(fmt.tprintf("%s models from the next analysis on", option.label))
+			}
+		}
+		y += px(32)
+		hint: cstring
+		switch prefs.model_profile {
+		case .Auto:     hint = "Picked from this computer's GPU and memory."
+		case .Fast:     hint = "Any computer. The CPU is enough."
+		case .Balanced: hint = "A GPU with 4 GB, or an Apple Silicon Mac."
+		case .Best:     hint = "A GPU with 8 GB or more. Slowest, most accurate."
+		}
+		draw_text(.Regular, hint, x, y, FS_SMALL, TEXT_FAINT)
+		y += px(24)
+	}
 
 	y += px(4)
 	draw_text(.Regular, "Sound effects are always imported.", x, y, FS_SMALL, TEXT_FAINT)

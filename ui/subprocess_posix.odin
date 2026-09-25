@@ -18,6 +18,7 @@ package musictagger
 // same reason as on Windows: a child that probes stdin must not hang on it.
 
 import "core:c"
+import "core:os"
 import "core:strings"
 import "core:sys/posix"
 
@@ -60,12 +61,15 @@ when ODIN_OS == .Darwin {
 	@(private)
 	current_environ :: proc() -> [^]cstring { return _NSGetEnviron()^ }
 } else {
+	// Only a fallback for when core:os cannot list its environment, which
+	// does not happen in practice. Declaring libc's `environ` here clashed
+	// with a symbol of the same name in optimised builds, so the fallback is
+	// an empty environment instead.
 	@(private)
-	foreign spawnlib {
-		environ: [^]cstring
+	current_environ :: proc() -> [^]cstring {
+		@(static) empty: [1]cstring
+		return raw_data(empty[:])
 	}
-	@(private)
-	current_environ :: proc() -> [^]cstring { return environ }
 }
 
 // A child that exits while we are writing to its stdin raises SIGPIPE, whose
@@ -116,8 +120,20 @@ stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> 
 		posix_spawn_file_actions_addchdir_np(&fa, strings.clone_to_cstring(working_dir, context.temp_allocator))
 	}
 
+	// The environment is taken from Odin's view of it, not libc's. On Linux
+	// core:os keeps its own copy, so a variable the app sets (the model
+	// profile, for one) is invisible in libc's `environ` and a child built
+	// from that would never see it.
+	envp := current_environ()
+	if env, env_err := os.environ(context.temp_allocator); env_err == nil {
+		list := make([]cstring, len(env) + 1, context.temp_allocator)
+		for kv, i in env { list[i] = strings.clone_to_cstring(kv, context.temp_allocator) }
+		list[len(env)] = nil
+		envp = raw_data(list)
+	}
+
 	pid: posix.pid_t
-	err := posix.posix_spawnp(&pid, argv[0], &fa, nil, raw_data(argv), current_environ())
+	err := posix.posix_spawnp(&pid, argv[0], &fa, nil, raw_data(argv), envp)
 
 	// The parent keeps only its own ends, or the pipe never reaches EOF.
 	posix.close(out_pipe[1])

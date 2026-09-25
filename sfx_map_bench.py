@@ -5,6 +5,11 @@ cannot tell you whether a map is good; this can.
 
     venv\Scripts\python.exe work_bench.py        # rebuild the families
     venv\Scripts\python.exe sfx_map_bench.py     # score them
+    venv\Scripts\python.exe sfx_map_bench.py pe-av-small   # another model's cache
+
+To compare a model, fill its cache first: set the profile that uses it
+(MUSICTAGGER_PROFILE=balanced for pe-av-small) and build the effects map
+once in the app, then pass the cache's name here.
 
 The benchmark is derived from the library's own filenames — these are CamelCase
 with a counter (BabyCryWhimper, Whoosh 12, Boom69), so the leading word says
@@ -54,7 +59,9 @@ family_of = {}
 for fam, ps in bench.items():
     for p in ps: family_of[str(Path(p)).lower()] = fam
 all_paths = [Path(l) for l in Path("work/sfx_all.txt").read_text(encoding="utf-8").splitlines() if l.strip()]
-cache = EmbeddingCache("clap-sfx-v1")
+space = sys.argv[1] if len(sys.argv) > 1 else "clap-sfx-v1"
+print(f"model cache: {space}")
+cache = EmbeddingCache(space)
 X, keys = [], []
 for p in all_paths:
     v = cache.get(p)

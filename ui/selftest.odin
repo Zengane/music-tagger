@@ -456,6 +456,25 @@ run_pipe_test :: proc() -> int {
 	check("the child produced output", total > 0)
 	check("output arrived as whole lines", lines > 0)
 
+	// A setting the app puts in its environment reaches the jobs it starts.
+	// On Linux core:os keeps its own copy of the environment, and children
+	// built from libc's copy never saw the model profile.
+	{
+		saved := prefs.model_profile
+		prefs.model_profile = .Balanced
+		apply_model_profile()
+		when ODIN_OS == .Windows {
+			echo := []string{"cmd", "/c", "echo %MUSICTAGGER_PROFILE%"}
+		} else {
+			echo := []string{"sh", "-c", "echo $MUSICTAGGER_PROFILE"}
+		}
+		out, _, ran := run_capture(echo, context.temp_allocator)
+		got := strings.trim_space(string(out))
+		check("a child sees the model profile", ran && got == "balanced", got)
+		prefs.model_profile = saved
+		apply_model_profile()
+	}
+
 	fmt.printf("\n%s\n", failures == 0 ? "all checks passed" : "checks failed")
 	return failures == 0 ? 0 : 1
 }
@@ -477,7 +496,25 @@ test_node_layout :: proc() {
 	           len(nodes.dots), len(nodes.anchors), elapsed)
 	check("every track in view got a dot", len(nodes.dots) == len(search.view),
 	      fmt.tprintf("%d dots for %d tracks", len(nodes.dots), len(search.view)))
-	check("tags became anchors", len(nodes.anchors) > 0)
+	// An anchor needs a tag on three tracks in view (see nodes.odin).
+	anchorable := false
+	{
+		seen: map[string]int
+		defer delete(seen)
+		for &t in lib.tracks {
+			if !kind_allows(&t) { continue }
+			for tag in t.tags {
+				if tag_kind(tag) not_in MAP_KINDS { continue }
+				seen[tag] += 1
+				if seen[tag] >= 3 { anchorable = true }
+			}
+		}
+	}
+	if anchorable {
+		check("tags became anchors", len(nodes.anchors) > 0)
+	} else {
+		fmt.println("  skip  tags became anchors — no tag is on three tracks")
+	}
 	check("layout is quick enough to do on entry", elapsed < 2000,
 	      fmt.tprintf("%.0f ms", elapsed))
 
@@ -1694,7 +1731,7 @@ report_library_game_guesses :: proc() {
 		append(list, i)
 	}
 
-	agreed, proposed, quiet := 0, 0, 0
+	agreed, proposed, quiet, compared := 0, 0, 0, 0
 	for dir, list in folders {
 		if len(list) < 2 { continue }
 		g, ok := guess_game_for_tracks(list[:])
@@ -1709,6 +1746,7 @@ report_library_game_guesses :: proc() {
 			if existing != "" { break }
 		}
 		if existing != "" {
+			compared += 1
 			if existing == g.tag { agreed += 1 }
 			else {
 				fmt.printf("        %-34s proposes %-28s already tagged %s\n",
@@ -1724,8 +1762,14 @@ report_library_game_guesses :: proc() {
 	}
 	fmt.printf("        %d folders agree with their existing tag, %d untagged folders got a proposal, %d gave nothing\n",
 	           agreed, proposed, quiet)
-	check("it agrees with tags already applied more often than not", agreed > 0,
-	      fmt.tprintf("%d agreed", agreed))
+	// Only a question when some folder already carries a game tag and got a
+	// proposal to compare it with; a library without one cannot answer it.
+	if compared == 0 {
+		fmt.println("  skip  it agrees with tags already applied — no tagged folder to compare with")
+	} else {
+		check("it agrees with tags already applied more often than not", agreed * 2 >= compared,
+		      fmt.tprintf("%d of %d agreed", agreed, compared))
+	}
 }
 
 // ── the tagging tab ─────────────────────────────────────────────────────────
@@ -1787,11 +1831,25 @@ test_tagging_tab :: proc() {
 	check("changes are pending, not written", count_dirty() > 0 || tagged == 0,
 	      fmt.tprintf("%d pending", count_dirty()))
 
-	// Put the library back so later checks see it as it is on disk.
+	// A rescan keeps edits that have not been saved: rescanning while tagging
+	// must not throw work away (merge_scan_result). This test used to expect
+	// the opposite, from before that was decided.
+	pending := count_dirty()
 	start_scan(lib.root, true, false)
 	for !poll_scan() { }
 	rebuild_view()
-	check("rescanning discards unsaved changes", count_dirty() == 0,
+	invalidate_dirty_count()
+	check("rescanning keeps unsaved changes", count_dirty() == pending,
+	      fmt.tprintf("%d pending before, %d after", pending, count_dirty()))
+
+	// Put the library back so later checks see it as it is on disk: let go of
+	// the edits, then read the disk again.
+	for &t in lib.tracks { t.dirty = false }
+	invalidate_dirty_count()
+	start_scan(lib.root, true, false)
+	for !poll_scan() { }
+	rebuild_view()
+	check("discarded edits are gone after a rescan", count_dirty() == 0,
 	      fmt.tprintf("%d still pending", count_dirty()))
 }
 

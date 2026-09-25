@@ -193,12 +193,17 @@ def test_organize():
         check((lib / "Epic" / ".ts" / "song.mp3.json").exists(), "sidecar follows the file")
         check(read_tags(moved) == ["Epic", "5star"], "tags survive the move")
         check(not (src_dir / ".ts").exists(), "empty .ts folder is cleaned up")
-        check(src_dir.exists(), "the source mood folder itself is left alone")
+        # Filing prunes folders it empties (organize._prune_empty), up to but
+        # never including the library root. This check expected the folder to
+        # stay, from before that was added.
+        check(not src_dir.exists(), "the emptied source folder is removed")
+        check(lib.exists(), "the library root itself is never removed")
 
         check(organize.plan(moved, lib, "Epic")["status"] == "already-there",
               "a file already in place is a no-op")
 
         clash = lib / "Adventure" / "song.mp3"
+        clash.parent.mkdir(exist_ok=True)
         clash.write_bytes(b"different audio")
         cp = organize.plan(clash, lib, "Epic")
         check(cp["status"] == "collision", "a name clash is refused")
@@ -348,8 +353,9 @@ def test_gametag():
     from mtag import gametag
 
     cases = [
-        ("Freezeflame Galaxy (Ice) -  Super Mario Galaxy.m4a", "Mario-Galaxy"),
-        ("1. Trailer Theme - Super Mario Odyssey OST.mp3", "Mario-Odyssey"),
+        # One tag for the whole series (see GAME_PHRASES in mtag/taxonomy.py).
+        ("Freezeflame Galaxy (Ice) -  Super Mario Galaxy.m4a", "Mario"),
+        ("1. Trailer Theme - Super Mario Odyssey OST.mp3", "Mario"),
         ("Shin Megami Tensei IV OST - K's Tavern.mp3", "SMT4"),
         ("Clock Town First Day - The Legend of Zelda Majora's Mask OST.mp3", "N64-Zelda"),
         ("Dizzy Sim- Sims Hot Date.mp3", "Sims"),
@@ -363,9 +369,11 @@ def test_gametag():
         got = gametag.detect(Path("/lib/Chill") / name)
         check(got == want, f"{name[:44]!r} -> {got}")
 
-    # Longest phrase wins, or "Super Mario Galaxy" would match a bare "Mario".
-    check(gametag.from_text("Super Mario Galaxy 2 Soundtrack") == "Mario-Galaxy",
-          "longer phrases are matched first")
+    # Longest phrase wins. No two games in the shipped table overlap any
+    # more (the Mario series became one tag), so the ordering is checked on
+    # the table itself: every phrase comes before any shorter one.
+    lengths = [len(p) for p, _ in gametag._PHRASES]
+    check(lengths == sorted(lengths, reverse=True), "longer phrases are matched first")
 
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -418,7 +426,7 @@ def test_gametag():
         comp.mkdir(parents=True)
         t4 = comp / "Super Mario Galaxy - Gusty Garden.mp3"
         t4.write_bytes(b"x")
-        check(gametag.detect(t4, lib) == "Mario-Galaxy",
+        check(gametag.detect(t4, lib) == "Mario",
               "a known filename beats an unknown folder")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

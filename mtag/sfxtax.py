@@ -284,3 +284,59 @@ def group_of(tag):
         if tag in tags:
             return name
     return None
+
+
+# Plain descriptions for asking a text-audio model (PE-AV) about each category
+# directly, instead of going through AudioSet's classes. Length is measured and
+# intent is the designer's word, so neither group is here.
+SFX_PROMPTS: dict[str, list[str]] = {
+    # shape
+    "Riser": ["a rising sound effect that builds up tension", "an upward riser sweep"],
+    "Downlifter": ["a falling downlifter sound effect", "a downward pitch sweep"],
+    "Impact": ["a heavy impact hit", "a loud cinematic impact"],
+    "Whoosh": ["a fast whoosh", "a swoosh passing by"],
+    "Drone": ["a long steady drone", "a sustained dark drone"],
+    "Stab": ["a short sharp stab sound"],
+    "Swell": ["a swelling sound that grows louder"],
+    "Bright": ["a bright high-pitched sound"],
+    "Dark": ["a dark low rumbling sound"],
+    "Boomy": ["a boomy resonant low hit"],
+    "Sub": ["a deep sub bass boom"],
+    "Punchy": ["a punchy tight hit"],
+    "Sustained": ["a long sustained sound"],
+    # type
+    "Footstep": ["footsteps", "someone walking"],
+    "Foley": ["foley sounds of everyday objects being handled"],
+    "Interface": ["a user interface click or beep", "a menu sound in a video game"],
+    "Magic": ["a magic spell sound effect", "a sparkling magical shimmer"],
+    "Weapon": ["a weapon sound", "a gunshot"],
+    "Vehicle": ["a vehicle engine", "a car passing by"],
+    "Mechanical": ["a mechanical machine sound", "gears and servos moving"],
+    "Creature": ["a monster or creature growling", "an animal vocalisation"],
+    "Voice": ["a human voice", "a person shouting"],
+    "Nature": ["sounds of nature", "birds and wind outdoors"],
+    "Ambience": ["a background ambience", "room tone and background atmosphere"],
+    "Musical": ["a short musical sound", "a musical sting"],
+    "Explosion": ["an explosion", "a big blast"],
+    "Break": ["something breaking", "glass shattering"],
+    "Liquid": ["liquid pouring", "water splashing"],
+    "Fire": ["fire crackling", "flames burning"],
+    "Electricity": ["electric zaps and buzzing", "an electrical spark"],
+    # material
+    "Metal": ["a metallic clang", "metal being hit"],
+    "Wood": ["a wooden knock", "wood cracking"],
+    "Glass": ["glass clinking", "glass breaking"],
+    "Stone": ["stones and rocks hitting", "concrete debris"],
+    "Water": ["water", "splashing water"],
+    "Cloth": ["cloth rustling", "fabric movement"],
+    "Paper": ["paper rustling", "a page being turned"],
+    "Plastic": ["plastic being handled", "a plastic click"],
+    "Electronic": ["an electronic synthesized sound", "digital beeps"],
+    "Organic": ["an organic squelch", "wet flesh sounds"],
+    # space
+    "Close": ["a close-up dry recording"],
+    "Room": ["a sound in a small room with some reverb"],
+    "Hall": ["a sound in a large reverberant hall"],
+    "Outdoor": ["a sound recorded outdoors"],
+    "Underwater": ["a muffled underwater sound"],
+}

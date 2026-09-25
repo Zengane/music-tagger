@@ -10,8 +10,17 @@ from mtag.dataset import EmbeddingCache
 def emit(**event):
     print(json.dumps(event), flush=True)
 
+def _encoder():
+    """The profile's sound-and-text model (mtag/profiles.py): general CLAP
+    on the fast profile, as before, PE-AV above it."""
+    from mtag.encoders import audio_text_encoder
+
+    return audio_text_encoder()
+
+
 def load_vectors(paths):
-    cache = EmbeddingCache("clap-sfx-v1")
+    probe = _encoder()
+    cache = EmbeddingCache(probe.name)
     encoder = None
     ready, vectors = [], []
     try:
@@ -21,12 +30,8 @@ def load_vectors(paths):
                 except (OSError, ValueError): vector = None
                 if vector is None:
                     if encoder is None:
-                        emit(event="step",detail="Loading general audio model (first use may download weights)")
-                        from mtag.encoders import ClapMusicEncoder
-                        class EffectsEncoder(ClapMusicEncoder):
-                            MODEL_ID = "laion/clap-htsat-unfused"
-                            max_windows = 4
-                        encoder = EffectsEncoder()
+                        emit(event="step",detail=f"Loading the sound model {probe.MODEL_ID} (first use downloads it)")
+                        encoder = probe
                         encoder.load()
                     vector = encoder.embed_file(path)
                     cache.put(path,vector)
@@ -97,13 +102,7 @@ def concept_regions(paths, vectors, plane, min_files=12, limit=40):
     mean drags the label into empty space between them.
     """
     try:
-        from mtag.encoders import ClapMusicEncoder
-
-        class EffectsEncoder(ClapMusicEncoder):
-            MODEL_ID = "laion/clap-htsat-unfused"
-            max_windows = 4
-
-        encoder = EffectsEncoder()
+        encoder = _encoder()
         encoder.load()
         try:
             text = np.asarray(encoder.embed_text(CONCEPTS), dtype=np.float32)
@@ -207,7 +206,7 @@ def main():
     emit(event="step",detail="Naming the regions")
     regions=concept_regions(ready,vectors,plane)
     emit(event="step",detail=f"{len(regions)} regions named")
-    data={"version":1,"encoder":"clap-sfx-v1",
+    data={"version":1,"encoder":_encoder().name,
           "points":{str(p):xy.tolist() for p,xy in zip(ready,plane)},
           "regions":regions}
     tmp=out.with_suffix(".tmp")

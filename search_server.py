@@ -105,6 +105,20 @@ def encoders_for(build) -> tuple[dict, dict]:
         return m.embed_text
     enc["clap-music"] = _Lazy(clap_music, "the music search model")
 
+    # The profile's sound model (PE-AV above the fast profile). Its vectors
+    # are written by the effects job and the effects map.
+    from mtag.encoders import BY_MODEL_ID
+
+    at_cls = BY_MODEL_ID.get(build.audio_text)
+    if at_cls is not None and at_cls.name not in ("clap-sfx-v1", "clap-music"):
+        spaces[at_cls.name] = True
+
+        def audio_text(cls=at_cls):
+            m = cls()
+            m.load()
+            return m.embed_text
+        enc[at_cls.name] = _Lazy(audio_text, "the sound search model")
+
     spaces["clap-sfx-v1"] = True
 
     def clap_sfx():
@@ -122,6 +136,12 @@ def encoders_for(build) -> tuple[dict, dict]:
 
 def main() -> int:
     console.init()
+    # The app writes UTF-8. On Windows stdin would otherwise be read in the
+    # ANSI code page, and "café" or "ブルー" would arrive as mojibake.
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--paths-from", required=True)
     args = ap.parse_args()
@@ -134,7 +154,9 @@ def main() -> int:
     spaces, encoders = encoders_for(build)
 
     def build_index():
-        return Index(paths, spaces, media_builds=[build.name, "measured"])
+        # Media results from any profile are read for words (captions, OCR),
+        # the current one first; vectors only from the current models.
+        return Index(paths, spaces, media_builds=[build.name, "fast", "balanced", "best", "small", "large", "measured"])
 
     index = build_index()
     emit(event="ready", files=len(paths), spaces=index.counts())
