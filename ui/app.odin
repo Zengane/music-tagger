@@ -35,6 +35,11 @@ App :: struct {
 	shortcuts_open: bool,
 	// How many files the delete confirmation is about.
 	delete_targets: int,
+	// Which files, by path, copied when the dialog opens. Indices would not
+	// do: a rescan finishing while the dialog is open renumbers the library
+	// and clears the selection, and the first file in the list was deleted
+	// instead of the chosen one.
+	delete_paths: [dynamic]string,
 
 	// Set by the title bar's close button. raylib's own close flag covers
 	// Alt+F4 and the taskbar; this covers the button we draw.
@@ -902,6 +907,7 @@ draw_tag_editor :: proc(screen: Rect) {
 	case .Confirm_Filing:
 		// Four destinations at most are listed; the rest are summed up.
 		h = px(250) + f32(min(len(filing_destinations()), 4)) * px(22)
+		if filing.unsaved > 0 { h += px(22) }
 	case .Edit_Marker, .New_Tag, .Rename, .Edit_Game, .Add_Library, .Add_Folder, .Rename_Library, .Relocate_Library:
 	}
 	h = min(h, screen.height - px(80))
@@ -1008,6 +1014,12 @@ draw_tag_editor :: proc(screen: Rect) {
 			          fmt.ctprintf("%d skipped: %d already there, %d name clash, %d gone",
 			                       skipped, already, collision, missing),
 			          x, y, FS_SMALL, WARN_C)
+			y += px(22)
+		}
+		if unsaved := filing.unsaved; unsaved > 0 {
+			draw_text(.Regular,
+			          fmt.ctprintf("%d with unsaved tags: their sidecars are saved first.", unsaved),
+			          x, y, FS_SMALL, TEXT_DIM)
 			y += px(22)
 		}
 		draw_text(.Regular, "Nothing is overwritten. The library is rescanned after.",
@@ -2364,7 +2376,16 @@ draw_track_menu :: proc() {
 		_ = ok
 
 	case 11:
-		app.delete_targets = many ? len(app.selection) : 1
+		for p in app.delete_paths { delete(p) }
+		clear(&app.delete_paths)
+		if many {
+			for index in app.selection {
+				if index >= 0 && index < len(lib.tracks) { append(&app.delete_paths, strings.clone(lib.tracks[index].path)) }
+			}
+		} else {
+			append(&app.delete_paths, strings.clone(t.path))
+		}
+		app.delete_targets = len(app.delete_paths)
 		open_tag_editor(.Confirm_Track_Delete, t.name, "")
 	}
 }
@@ -2376,12 +2397,15 @@ draw_track_menu :: proc() {
 // your mind about one of them, and Windows already has the place for that.
 @(private)
 delete_chosen_tracks :: proc() -> (deleted: int, failed: int) {
-	targets := make([dynamic]int, 0, 8, context.temp_allocator)
-	if len(app.selection) > 1 {
-		append(&targets, ..app.selection[:])
-	} else if app.selected >= 0 {
-		append(&targets, app.selected)
+	// Resolved by path now, against the library as it is now.
+	by_path := make(map[string]int, len(lib.tracks), context.temp_allocator)
+	for &t, i in lib.tracks { by_path[path_key(t.path)] = i }
+	targets := make([dynamic]int, 0, len(app.delete_paths), context.temp_allocator)
+	for p in app.delete_paths {
+		if index, ok := by_path[path_key(p)]; ok { append(&targets, index) }
 	}
+	for p in app.delete_paths { delete(p) }
+	clear(&app.delete_paths)
 	if len(targets) == 0 { return }
 
 	// Highest index first, so removing one cannot move the next one.

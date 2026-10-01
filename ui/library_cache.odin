@@ -74,7 +74,12 @@ load_library_snapshot :: proc(root: string) -> bool {
 clone_track :: proc(t: Track, alloc: runtime.Allocator) -> Track {
 	out := t
 	out.media_kind = strings.clone(t.media_kind, alloc)
-	out.media_kind = strings.clone(t.media_kind, alloc)
+	// Every string has to be copied: `out := t` copies only the headers, and
+	// the source's memory (a snapshot read into the temp allocator, or the
+	// old library's arena on a rescan) is freed soon after.
+	out.caption = strings.clone(t.caption, alloc)
+	out.ocr = strings.clone(t.ocr, alloc)
+	rebuild_text_haystack(&out, alloc)
 	out.cues = make([dynamic]Cue, 0, len(t.cues), alloc)
 	for cue in t.cues { append(&out.cues, Cue{cue.at, strings.clone(cue.name, alloc)}) }
 	out.path = strings.clone(t.path, alloc)

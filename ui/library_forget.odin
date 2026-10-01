@@ -22,6 +22,14 @@ forget_track :: proc(index: int) {
 	if player.track == index { stop_playback() }
 	else if player.track > index { player.track -= 1 }
 
+	// The playing video is held by position too. Left alone, deleting a file
+	// above it pointed it past the end of the list, and the next frame
+	// stopped the program on a bounds check.
+	if video.active || video.decoder != nil {
+		if video.index == index { video_close() }
+		else if video.index > index { video.index -= 1 }
+	}
+
 	ordered_remove(&lib.tracks, index)
 
 	// Every remembered position after the removed one moves down by one.

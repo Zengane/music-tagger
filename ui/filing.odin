@@ -49,6 +49,10 @@ Filing :: struct {
 	moved:    int,
 	skipped:  int,
 	failed:   int,
+	// The rescan after a move, when it could not start yet (an analysis was
+	// running). Started as soon as it can be.
+	rescan_pending: bool,
+	unsaved:  int, // planned moves with unsaved edits; counted once, for the dialog
 }
 
 filing: Filing
@@ -59,6 +63,30 @@ filing_script :: proc() -> string {
 
 filing_busy :: proc() -> bool {
 	return filing.phase == .Planning || filing.phase == .Moving
+}
+
+@(private)
+analysis_running :: proc() -> bool {
+	return job.phase == .Loading || job.phase == .Running
+}
+
+// The files the plan will move that carry unsaved tag edits.
+//
+// Filing moves a file by its tags in memory, and the rescan after it reads
+// tags back from the sidecars at the new paths. An unsaved edit would be on
+// neither: the moved file came back without it, and the edit stayed behind on
+// a row for a path that no longer exists. So these are saved before moving.
+filing_unsaved :: proc() -> []int {
+	by_path := make(map[string]int, len(lib.tracks), context.temp_allocator)
+	for &t, i in lib.tracks { by_path[path_key(t.path)] = i }
+	out := make([dynamic]int, 0, 16, context.temp_allocator)
+	for m in filing.moves {
+		if m.status != "ok" { continue }
+		if i, found := by_path[path_key(m.src)]; found && (lib.tracks[i].dirty || lib.tracks[i].description_dirty || lib.tracks[i].cues_dirty) {
+			append(&out, i)
+		}
+	}
+	return out[:]
 }
 
 // ── which folder a track belongs in ─────────────────────────────────────────
@@ -117,6 +145,7 @@ filing_candidates :: proc(indices: []int) -> int {
 start_filing_plan :: proc(indices: []int) {
     if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if filing_busy() { return }
+	if analysis_running() { toast("Finish or cancel the analysis before filing"); return }
 
 	lines := collect_moves(indices)
 	if len(lines) == 0 {
@@ -146,6 +175,19 @@ start_filing_plan :: proc(indices: []int) {
 start_filing_apply :: proc() {
     if folder_copy.running { toast("Wait for the folder import to finish"); return }
 	if filing.phase != .Ready { return }
+	if analysis_running() { toast("Finish or cancel the analysis before filing"); return }
+
+	failed := 0
+	last := ""
+	for i in filing_unsaved() {
+		if e := save_track(i); e != "" { failed += 1; last = e }
+	}
+	if failed > 0 {
+		// Moving now would lose those edits; stop and say so.
+		toast(fmt.tprintf("nothing moved: %d sidecars could not be saved (%s)", failed, last))
+		filing.phase = .Idle
+		return
+	}
 	if !filing_spawn("--apply") { return }
 	filing.phase = .Moving
 	filing.moved, filing.skipped, filing.failed = 0, 0, 0
@@ -177,7 +219,16 @@ cancel_filing :: proc() {
 	toast("filing stopped")
 }
 
+// The rescan after a move. Refused while an analysis runs, so it waits.
+@(private)
+filing_rescan :: proc() {
+	if !filing.rescan_pending || analysis_running() || scan.running || folder_copy.running { return }
+	filing.rescan_pending = false
+	start_scan(lib.root, app.recursive, app.include_sfx)
+}
+
 poll_filing :: proc() {
+	filing_rescan()
 	if !filing_busy() { return }
 
 	buf: [32 * 1024]byte
@@ -222,13 +273,15 @@ finish_filing :: proc() {
 		// patch that up piecemeal — a rescan is what the app already does after
 		// anything that changes the files.
 		if filing.moved > 0 {
-			start_scan(lib.root, app.recursive, app.include_sfx)
+			filing.rescan_pending = true
+			filing_rescan()
 			toast(fmt.tprintf("filed %d tracks into their library folders", filing.moved))
 		} else {
 			toast("nothing moved")
 		}
 	} else {
 		filing.phase = .Ready
+		filing.unsaved = len(filing_unsaved())
 
 		// Straight into the dialog. The plan pass exists to be looked at, and
 		// a plan that finished without saying so would just look like nothing

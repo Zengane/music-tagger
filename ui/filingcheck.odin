@@ -13,6 +13,7 @@ package musictagger
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:time"
 
 run_filing_check :: proc(folder: string) -> int {
@@ -48,6 +49,17 @@ run_filing_check :: proc(folder: string) -> int {
 		fmt.println("nothing to file — the library is already arranged")
 		fmt.printf("\n%s\n", failures == 0 ? "all checks passed" : "checks failed")
 		return failures == 0 ? 0 : 1
+	}
+
+	// One file to be moved gets a tag that is not saved yet. Filing used to
+	// move it by that tag and then lose the tag: the rescan read the old
+	// sidecar at the new path, and kept the edit on a row for the old path.
+	probe := ""
+	for i in all {
+		if len(collect_moves({i})) == 0 { continue }
+		add_tag_to_track(&lib.tracks[i], "Filing check tag")
+		probe = strings.clone(lib.tracks[i].name)
+		break
 	}
 
 	fmt.println("\nplanning")
@@ -86,6 +98,17 @@ run_filing_check :: proc(folder: string) -> int {
 	refilter_nodes()
 	invalidate_tagging()
 	fmt.printf("        %d tracks, %d in view\n", len(lib.tracks), len(search.view))
+
+	if probe != "" {
+		rows, tagged := 0, 0
+		for &t in lib.tracks {
+			if t.name != probe { continue }
+			rows += 1
+			for tag in t.tags { if tag == "Filing check tag" { tagged += 1 } }
+		}
+		check("an unsaved tag moves with its file", rows == 1 && tagged == 1,
+		      fmt.tprintf("%d rows named %s, %d with the tag", rows, probe, tagged))
+	}
 
 	check("nothing is selected any more", app.selected == -1 && len(app.selection) == 0,
 	      fmt.tprintf("selected=%d, %d selected", app.selected, len(app.selection)))
