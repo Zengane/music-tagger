@@ -8,6 +8,7 @@ package musictagger
 // library, so it is safe to run against `Mega Music Pack` directly.
 
 import "core:fmt"
+import "core:path/filepath"
 import "core:os"
 import "core:math"
 import "core:mem/virtual"
@@ -2789,6 +2790,33 @@ run_review_ui :: proc() -> int {
     image=rl.LoadImageFromScreen()
     _=rl.ExportImage(image,"work/review-sfx-families.png")
     rl.UnloadImage(image)
+
+    // The sorted effects map, from the project's real map file when it has
+    // one: the whole map, then zoomed in on one sound and its neighbours.
+    reset_sfx_sound_map()
+    load_sfx_sound_map()
+    if len(sfx_extra.row_key)>0 {
+        clear(&lib.tracks)
+        for key in sfx_extra.row_key {
+            name:=filepath.base(key)
+            append(&lib.tracks,Track{name=name,name_low=name,rel=name,path=key,is_sfx=true})
+        }
+        rebuild_view(); invalidate_nodes()
+        nodes.mode=.Sound
+        app.selected=len(lib.tracks)/3
+        for _ in 0..<2 { begin_ui(); rl.BeginDrawing(); rl.ClearBackground(BG); draw_nodes(rect(0,0,1440,900)); rl.EndDrawing(); end_ui() }
+        image=rl.LoadImageFromScreen()
+        _=rl.ExportImage(image,"work/review-sfx-map.png")
+        rl.UnloadImage(image)
+        if di,ok:=sfx_extra.dot_of_track[app.selected]; ok {
+            nodes.zoom=2.5
+            nodes.pan={-nodes.dots[di].pos.x,-nodes.dots[di].pos.y}
+        }
+        for _ in 0..<2 { begin_ui(); rl.BeginDrawing(); rl.ClearBackground(BG); draw_nodes(rect(0,0,1440,900)); rl.EndDrawing(); end_ui() }
+        image=rl.LoadImageFromScreen()
+        _=rl.ExportImage(image,"work/review-sfx-hop.png")
+        rl.UnloadImage(image)
+    }
     return 0
 }
 

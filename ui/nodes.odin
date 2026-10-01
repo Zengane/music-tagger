@@ -459,60 +459,6 @@ draw_nodes :: proc(r: Rect) {
 		}
 	}
 
-	// The signposts.
-	//
-	// Biggest region first, and a label is dropped when it would sit on top of
-	// one already placed. The effects map names sixty-odd regions and drawing
-	// them all put words across words — which reads as clutter, not as a map.
-	// The largest families keep their labels and the crowded small ones give
-	// theirs up until you zoom in and the crowding goes away on its own.
-	taken := make([dynamic]Rect, 0, 32, context.temp_allocator)
-
-	for a in nodes.anchors {
-		p := to_screen(a.pos, centre, nodes.pan, nodes.zoom)
-		if p.x < r.x - 120 || p.x > r.x + r.width + 120 { continue }
-		if p.y < r.y - 40  || p.y > r.y + r.height + 40 { continue }
-
-		col := tag_color_of(a.tag)
-		if a.spread <= 0 {
-			halo := col
-			halo.a = 26
-			rl.DrawCircleV(p, max(px(24) * nodes.zoom, px(10)), halo)
-		}
-
-		label := strings.clone_to_cstring(a.tag, context.temp_allocator)
-		lw := text_w(.Bold, label, FS_BODY)
-
-		// Labels keep their size as you zoom: they are signposts, not content.
-		//
-		// Bigger and on a solid plate, because the blobs underneath them are
-		// bright and a small tinted word on top of one is unreadable — which
-		// is what the last version was. The plate is opaque rather than a
-		// wash, the text is near-white rather than the tag's colour, and the
-		// tag's colour survives as a dot on the left and as the plate's edge.
-		// No dot. It looked like something to press, and it was not — the
-		// plate's edge already carries the tag's colour, which is the only
-		// thing the dot was for.
-		pad := px(8)
-		plate := rect(p.x - (lw + pad * 2) * 0.5, p.y - px(11), lw + pad * 2, px(22))
-
-		clash := false
-		for t in taken {
-			if plate.x < t.x + t.width && t.x < plate.x + plate.width &&
-			   plate.y < t.y + t.height && t.y < plate.y + plate.height {
-				clash = true
-				break
-			}
-		}
-		if clash { continue }
-		append(&taken, plate)
-
-		fill_round(plate, rl.Color{14, 17, 22, 242}, 5)
-		outline_round(plate, rl.Color{col.r, col.g, col.b, 170}, 5)
-		draw_text(.Bold, label, plate.x + pad, p.y - px(8), FS_BODY,
-		          rl.Color{238, 242, 248, 255})
-	}
-
 	// Dots.
 	//
 	// The radius barely grows with the zoom, and that is the whole point.
@@ -594,6 +540,63 @@ draw_nodes :: proc(r: Rect) {
 			}
 		}
 	}
+
+	// The signposts.
+	// Drawn after the dots, so a name is never hidden under the sounds it
+	// names. The effects map carries a hundred and more of them.
+	//
+	//
+	// Biggest region first, and a label is dropped when it would sit on top of
+	// one already placed. The effects map names sixty-odd regions and drawing
+	// them all put words across words — which reads as clutter, not as a map.
+	// The largest families keep their labels and the crowded small ones give
+	// theirs up until you zoom in and the crowding goes away on its own.
+	taken := make([dynamic]Rect, 0, 32, context.temp_allocator)
+
+	for a in nodes.anchors {
+		p := to_screen(a.pos, centre, nodes.pan, nodes.zoom)
+		if p.x < r.x - 120 || p.x > r.x + r.width + 120 { continue }
+		if p.y < r.y - 40  || p.y > r.y + r.height + 40 { continue }
+
+		col := tag_color_of(a.tag)
+		if a.spread <= 0 {
+			halo := col
+			halo.a = 26
+			rl.DrawCircleV(p, max(px(24) * nodes.zoom, px(10)), halo)
+		}
+
+		label := strings.clone_to_cstring(a.tag, context.temp_allocator)
+		lw := text_w(.Bold, label, FS_BODY)
+
+		// Labels keep their size as you zoom: they are signposts, not content.
+		//
+		// Bigger and on a solid plate, because the blobs underneath them are
+		// bright and a small tinted word on top of one is unreadable — which
+		// is what the last version was. The plate is opaque rather than a
+		// wash, the text is near-white rather than the tag's colour, and the
+		// tag's colour survives as a dot on the left and as the plate's edge.
+		// No dot. It looked like something to press, and it was not — the
+		// plate's edge already carries the tag's colour, which is the only
+		// thing the dot was for.
+		pad := px(8)
+		plate := rect(p.x - (lw + pad * 2) * 0.5, p.y - px(11), lw + pad * 2, px(22))
+
+		clash := false
+		for t in taken {
+			if plate.x < t.x + t.width && t.x < plate.x + plate.width &&
+			   plate.y < t.y + t.height && t.y < plate.y + plate.height {
+				clash = true
+				break
+			}
+		}
+		if clash { continue }
+		append(&taken, plate)
+
+		fill_round(plate, rl.Color{14, 17, 22, 242}, 5)
+		outline_round(plate, rl.Color{col.r, col.g, col.b, 170}, 5)
+		draw_text(.Bold, label, plate.x + pad, p.y - px(8), FS_BODY,
+		          rl.Color{238, 242, 248, 255})
+	}
 	nodes.hover = hover_index
 
 	// The name of whatever is under the pointer, and a click to open it.
@@ -606,7 +609,7 @@ draw_nodes :: proc(r: Rect) {
 		label := elide_right(display_text(t.name), px(320), FS_SMALL)
 		// On the effects map, which group it is in: the name of the colour.
 		if group := nodes.source == .Semantic ? sfx_group_of(d.track) : ""; group != "" {
-			label = elide_right(display_text(fmt.tprintf("%s  Â·  %s", t.name, group)), px(380), FS_SMALL)
+			label = elide_right(display_text(fmt.tprintf("%s  ·  %s", t.name, group)), px(380), FS_SMALL)
 		}
 		w := text_w(.Auto, label, FS_SMALL) + px(16)
 		box := rect(min(p.x + px(12), r.x + r.width - w - px(6)), p.y - px(28), w, px(22))
@@ -664,7 +667,7 @@ draw_map_mode_switch :: proc(r: Rect) {
 	caption: cstring = "placed by what was measured"
 	if nodes.source == .Model { caption = "placed by how the model hears them" }
     if search.kind == .Effects {
-        caption = nodes.source == .Semantic ? "grouped by how they sound Â· click one, then Right / Left to hop to the nearest" : "placed by what was measured - sort them by sound for groups and neighbours"
+        caption = nodes.source == .Semantic ? "grouped by how they sound · click one, then Right / Left to hop to the nearest" : "placed by what was measured - sort them by sound for groups and neighbours"
     }
 	draw_text(.Regular, caption, x, y + px(3), FS_SMALL, TEXT_FAINT)
 	y += px(20)
@@ -792,6 +795,16 @@ frame_nodes :: proc(r: Rect, matches_only := false) {
 draw_node_legend :: proc(r: Rect) {
 	y := r.y + r.height - px(30)
 	x := r.x + px(PAD)
+
+	// On the sorted effects map a colour is a group, and the group's name is on
+	// the map, so the family legend would only be wrong.
+	if nodes.source == .Semantic {
+		count := fmt.ctprintf("%d effects · %d groups · drag to pan, wheel to zoom",
+		                      len(nodes.dots), len(nodes.anchors))
+		cw := text_w(.Regular, count, FS_SMALL)
+		draw_text(.Regular, count, r.x + r.width - cw - px(PAD), y, FS_SMALL, TEXT_FAINT)
+		return
+	}
 
 	entries := [4]struct{col: rl.Color, label: cstring}{
 		{MOOD_C,  "mood"},
