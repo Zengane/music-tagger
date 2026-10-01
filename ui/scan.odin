@@ -76,7 +76,7 @@ start_scan :: proc(root: string, recursive := true, include_sfx := false, additi
 	scan.request.known = make(map[string]Known_Features, len(lib.tracks))
 	for &t in lib.tracks {
 		if t.kind != .Audio || !t.features.valid { continue }
-		scan.request.known[path_key(t.path, context.allocator)] = Known_Features{t.size, t.mtime, t.features, t.duration}
+		scan.request.known[strings.clone(path_key(t.path))] = Known_Features{t.size, t.mtime, t.features, t.duration}
 	}
 	scan.save_epoch = sidecar_saves
 	scan.running = true
