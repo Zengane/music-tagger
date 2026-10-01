@@ -34,3 +34,7 @@ prefs.json
 /MusicTagger
 /mtag-test
 /screenshot*.png
+
+# The Downloads screen: its queue and options, and yt-dlp when the app installs it.
+downloads.json
+bin/yt-dlp*

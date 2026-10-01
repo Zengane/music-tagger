@@ -93,7 +93,7 @@ toolbar_right_width :: proc() -> f32 {
 
 @(private)
 toolbar_left_width :: proc() -> f32 {
-	w := px(PAD + 32)
+	w := px(PAD + 32 + 32) // the sidebar toggle and Downloads
 	if shows(.Up) { w += px(30) }
 	if shows(.Breadcrumb) { w += px(170) }
 	return w
@@ -127,6 +127,14 @@ draw_topbar :: proc(r: Rect) {
 		prefs.rail_visible = app.rail_visible
 		save_prefs()
 	}
+	x += px(32)
+
+	// Downloads: playlists and videos, with yt-dlp. Lit while any are running.
+	dlb := rect(x, cy, px(28), px(28))
+	audit_rect(dlb, "downloads")
+	active := downloads_active()
+	tip(dlb, active > 0 ? fmt.tprintf("Downloads (%d working)", active) : "Download playlists and videos")
+	if toggle_icon(dlb, .Import, active > 0) { dl.open = true }
 	x += px(32)
 
 	browsing := app.view == .Browse && lib.scanned

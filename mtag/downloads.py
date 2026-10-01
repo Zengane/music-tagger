@@ -44,6 +44,15 @@ NOISE_WORDS = [
 # "original soundtrack" goes before "soundtrack" leaves "original" behind.
 _NOISE = sorted({w.lower() for w in NOISE_WORDS}, key=len, reverse=True)
 
+
+
+def add_noise_words(words: list[str]) -> None:
+    """More words to strip, from the app's options ('remaster, ver.')."""
+    global _NOISE
+    extra = {w.strip().lower() for w in words if w.strip()}
+    _NOISE = sorted(set(_NOISE) | extra, key=len, reverse=True)
+
+
 # What a playlist is about, from its title and its videos' titles.
 GAME_HINTS = re.compile(
     r"\b(ost|o\.s\.t|soundtrack|bgm|gamerip|video ?game|game music|"

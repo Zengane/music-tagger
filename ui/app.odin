@@ -241,6 +241,7 @@ main :: proc() {
 	}
 
 	if len(os.args) > 1 && os.args[1] == "--review-ui" { os.exit(run_review_ui()) }
+	if len(os.args) > 1 && os.args[1] == "--downloadcheck" { os.exit(run_download_check(os.args[2:])) }
 
 	// Undecorated, because the caption bar is drawn by this program — see
 	// titlebar.odin, which also puts the resizing frame back.
@@ -304,6 +305,9 @@ main :: proc() {
 	defer cancel_analyze()
 	defer stop_split()
 	defer stop_folder_copy()
+	// yt-dlp is brought up to date on every start, in the background.
+	downloads_startup()
+	defer shutdown_downloads()
 
 	// `app.quit` is the title bar's close button. raylib's own close flag still
 	// works — Alt+F4 and the taskbar go through it.
@@ -325,6 +329,7 @@ main :: proc() {
 		poll_music_map()
 		poll_split()
 		poll_premiere_send()
+		poll_downloads()
 		// The warm-up finishing is when the rest of the features appear.
 		if _, _, warming := waveform_warmup(); !warming && features_pending {
 			features_pending = false
@@ -439,6 +444,20 @@ draw_app :: proc() {
 	dock := rect(0, H - dock_h, W, dock_h)
 	body_y := top.y + top.height
 	body_h := H - body_y - dock.height
+
+	// The Downloads screen replaces everything between the title bar and the
+	// player; see downloads.odin.
+	if dl.open {
+		ui.modal_open = dl.menu.open
+		if !player.playing { dock = rect(0, H - px(DOCK_COMPACT_H), W, px(DOCK_COMPACT_H)) }
+		draw_downloads(rect(0, title.height, W, dock.y - title.height))
+		draw_dock(dock)
+		hline(0, dock.y, W)
+		draw_titlebar(title)
+		draw_tooltip(rect(0, 0, W, H))
+		draw_toast(rect(px(PAD), dock.y - px(DL_STATUS_H) - px(32), W, px(24)))
+		return
+	}
 
 	// Panels are sized in design units and scaled like everything else, so a
 	// width dragged at one interface scale is the same width at another.

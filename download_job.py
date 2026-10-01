@@ -41,7 +41,8 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mtag.downloads import guess_collection, guess_tracks, render_template, safe_filename  # noqa: E402
+from mtag.downloads import (add_noise_words, guess_collection, guess_tracks,  # noqa: E402
+                            render_template, safe_filename)
 
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
 _print_lock = threading.Lock()
@@ -101,7 +102,8 @@ def _save_thumbnail(url: str, folder: Path, ffmpeg: str) -> str:
     if not url:
         return ""
     folder.mkdir(parents=True, exist_ok=True)
-    dest = folder / (hashlib.sha1(url.encode()).hexdigest()[:16] + ".jpg")
+    # PNG, whatever the site sends: the window's image loader reads PNG only.
+    dest = folder / (hashlib.sha1(url.encode()).hexdigest()[:16] + ".png")
     if dest.exists():
         return str(dest)
     try:
@@ -109,10 +111,6 @@ def _save_thumbnail(url: str, folder: Path, ffmpeg: str) -> str:
         data = urllib.request.urlopen(req, timeout=15).read()
     except Exception:
         return ""
-    if data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n":
-        dest.write_bytes(data)
-        return str(dest)
-    # WebP and the rest: the window reads JPEG and PNG, so ffmpeg converts.
     raw = dest.with_suffix(".src")
     raw.write_bytes(data)
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(raw), "-vf", "scale=320:-2", str(dest)],
@@ -121,7 +119,7 @@ def _save_thumbnail(url: str, folder: Path, ffmpeg: str) -> str:
     return str(dest) if dest.exists() else ""
 
 
-def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str) -> None:
+def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str, pattern: str = "auto") -> None:
     args = [ytdlp, "-J", "--flat-playlist", "--yes-playlist", "--no-warnings", "--color", "never"]
     if cookies:
         args += ["--cookies-from-browser", cookies]
@@ -165,8 +163,9 @@ def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str) -> 
         # title is what remains once the game is taken out.
         if guess["category"] != "game":
             guess["name"] = (uploader[: -len(" - Topic")] if uploader.endswith(" - Topic") else uploader) or guess["name"]
-    for e, parsed in zip(entries, guess_tracks(entries, guess["name"])):
-        e.update(parsed)
+    for e, parsed in zip(entries, guess_tracks(entries, guess["name"], pattern)):
+        e["original"] = e["title"]
+        e.update(parsed)  # title, artist, track, disc: what the tags will say
     year = ""
     date = info.get("upload_date") or info.get("modified_date") or ""
     if date[:4].isdigit():
@@ -183,8 +182,11 @@ def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str) -> 
 def run_probe(args: argparse.Namespace) -> int:
     thumbs = Path(args.thumbs)
     args.ytdlp, args.ffmpeg = resolve_exe(args.ytdlp), resolve_exe(args.ffmpeg)
+    if args.noise:
+        add_noise_words(args.noise.split(","))
     with futures.ThreadPoolExecutor(max_workers=3) as pool:
-        for f in [pool.submit(probe_one, u, args.ytdlp, thumbs, args.ffmpeg, args.cookies) for u in args.urls]:
+        for f in [pool.submit(probe_one, u, args.ytdlp, thumbs, args.ffmpeg, args.cookies, args.pattern)
+                  for u in args.urls]:
             try:
                 f.result()
             except Exception as exc:  # one bad link must not lose the others
@@ -207,6 +209,7 @@ class Runner:
         self.stop = threading.Event()
         self.procs: set[subprocess.Popen] = set()
         self.lock = threading.Lock()
+        self.gates: dict[tuple[str, str], threading.Lock] = {}
         self.staging = Path(plan["staging"])
         self.manifest_path = Path(plan.get("manifest") or self.staging / "done.json")
         try:
@@ -297,8 +300,11 @@ class Runner:
         return safe_filename(name or track.get("id") or "track")
 
     def already_there(self, item: dict, track: dict, folder: Path) -> str:
-        done = self.manifest.get(track.get("id") or "")
-        if done and Path(done).exists() and Path(done).parent == folder:
+        # Found by the video's id, so a file renamed since still counts.
+        with self.lock:
+            done = self.manifest.get(f"{track.get('id') or ''}:{item['mode']}")
+        if done and Path(done).exists() and \
+                os.path.normcase(str(Path(done).parent)) == os.path.normcase(str(folder)):
             return done
         stem = self.target_name(item, track)
         exts = AUDIO_EXTS if item["mode"] == "audio" else VIDEO_EXTS
@@ -373,7 +379,19 @@ class Runner:
         return dest
 
     def download(self, item: dict, track: dict) -> tuple[str, str]:
-        """Returns (state, detail): done/skipped/error/stopped and path or message."""
+        """Returns (state, detail): done/skipped/error/stopped and path or message.
+
+        The same video bound for the same folder twice in one plan (a
+        playlist and one of its videos pasted on their own) is fetched once:
+        the second waits for the first and then finds it there.
+        """
+        slot = (track.get("id") or track.get("url") or "", os.path.normcase(str(item["folder"])))
+        with self.lock:
+            gate = self.gates.setdefault(slot, threading.Lock())
+        with gate:
+            return self._download(item, track)
+
+    def _download(self, item: dict, track: dict) -> tuple[str, str]:
         key, tid = item["key"], track.get("id") or ""
         folder = Path(item["folder"])
         if self.stop.is_set():
@@ -445,7 +463,7 @@ class Runner:
             leftover.unlink(missing_ok=True)
         with self.lock:
             if tid:
-                self.manifest[tid] = str(dest)
+                self.manifest[f"{tid}:{item['mode']}"] = str(dest)
         emit("track", key=key, id=tid, state="done", path=str(dest))
         return "done", str(dest)
 
@@ -574,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ffmpeg", default="ffmpeg")
     p.add_argument("--thumbs", required=True)
     p.add_argument("--cookies", default="")
+    p.add_argument("--pattern", default="auto", choices=["auto", "artist-title", "title-artist", "title"])
+    p.add_argument("--noise", default="", help="more words to strip, comma separated")
     p.add_argument("urls", nargs="+")
     r = sub.add_parser("run")
     r.add_argument("--plan", required=True)
