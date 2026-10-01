@@ -70,8 +70,19 @@ class SFXMapTests(unittest.TestCase):
         groups = np.array([0, 0, 0, 1, 1, 1])
         audio = np.array([[1, 0]] * 3 + [[0, 1]] * 3, dtype=np.float32)
         text = np.array([[1, 0], [0, 1]], dtype=np.float32)
-        names = sfxmap.name_groups(paths, groups, audio, text, phrases=["a whoosh", "a thud"])
+        heard = {"whoosh": np.array([1, 0.1], dtype=np.float32)}
+        names = sfxmap.name_groups(paths, groups, audio, text, phrases=["a whoosh", "a thud"], word_text=heard)
         self.assertEqual(names, ["Whoosh", "thud"])
+
+    def test_a_word_the_model_does_not_hear_is_not_a_name(self):
+        paths = ["DSB1.wav", "DSB2.wav", "DSB3.wav"]
+        groups = np.array([0, 0, 0])
+        audio = np.array([[1, 0]] * 3, dtype=np.float32)
+        text = np.array([[1, 0], [0, 1]], dtype=np.float32)
+        unheard = {"dsb": np.array([-1, 0.2], dtype=np.float32)}
+        names = sfxmap.name_groups(paths, groups, audio, text, phrases=["a whoosh", "a thud"],
+                                   word_text=unheard, heard_rank=1)
+        self.assertEqual(names, ["whoosh"])
 
     def test_names_are_unique(self):
         groups = np.array([0, 0, 1, 1])

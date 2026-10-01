@@ -191,33 +191,17 @@ def name_tokens(stem: str) -> set[str]:
     return words
 
 
-def name_groups(paths, groups: np.ndarray, audio_text: np.ndarray | None,
-                text: np.ndarray | None, phrases=CONCEPTS,
-                agree: float = 0.6) -> list[str]:
-    """A name for every group.
+def word_prompt(word: str) -> str:
+    """How a filename word is put to the text tower."""
+    return f"the sound of {word}"
 
-    The audio decides: each group is named after the phrase its sounds match
-    best (the group's mean text-aligned vector against each phrase). When at
-    least `agree` of a group's files share a filename word, that word is the
-    name instead: "Whoosh" says more than "whoosh" only in that the user chose
-    it, and on game banks named `sfx_npc_03b` no word agrees, so the audio's
-    phrase stands.
 
-    Names are unique: a smaller group that would repeat a name takes its
-    second-best phrase as well, then a number.
-    """
+def agreed_words(paths, groups: np.ndarray, agree: float = 0.6) -> list[str]:
+    """Per group, the filename word that at least `agree` of its files share,
+    or "". Groups of fewer than three files never agree."""
     n_groups = int(groups.max()) + 1 if len(groups) else 0
-    best_phrase: list[list[str]] = [[] for _ in range(n_groups)]
-    if audio_text is not None and text is not None and len(phrases):
-        T = unit(text)
-        for g in range(n_groups):
-            m = unit(audio_text[groups == g].mean(axis=0, keepdims=True))
-            s = (m @ T.T)[0]
-            best_phrase[g] = [signpost(phrases[i]) for i in np.argsort(-s)[:3]]
-
     tokens = [name_tokens(Path(p).stem) for p in paths]
-    names: list[str] = []
-    used: Counter = Counter()
+    out = []
     for g in range(n_groups):
         rows = np.where(groups == g)[0]
         votes = Counter(w for r in rows for w in tokens[r])
@@ -225,8 +209,49 @@ def name_groups(paths, groups: np.ndarray, audio_text: np.ndarray | None,
         if votes and len(rows) >= 3:
             w, c = max(votes.items(), key=lambda kv: (kv[1], kv[0]))
             if c >= agree * len(rows):
-                word = w.capitalize()
-        phr = best_phrase[g]
+                word = w
+        out.append(word)
+    return out
+
+
+def name_groups(paths, groups: np.ndarray, audio_text: np.ndarray | None,
+                text: np.ndarray | None, phrases=CONCEPTS,
+                word_text: dict | None = None, agree: float = 0.6,
+                heard_rank: int = 10) -> list[str]:
+    """A name for every group.
+
+    The audio decides: each group is named after the phrase its sounds match
+    best (the group's mean text-aligned vector against each phrase).
+
+    A filename word the group's files agree on (see `agreed_words`) is the name
+    instead, but only when the sound model hears it too: put to the text tower
+    as "the sound of <word>", it has to score at least as well as the
+    `heard_rank`-th best phrase. That keeps "Siren" and "Sweeper", and drops
+    pack and product words like "Dsb", "Bpm" or "Moments", which a whole
+    folder shares but which say nothing about the sound. Without the model's
+    vectors for the words (`word_text`), no word is trusted.
+
+    Names are unique: a smaller group that would repeat a name takes its
+    second-best phrase as well, then a number.
+    """
+    n_groups = int(groups.max()) + 1 if len(groups) else 0
+    words = agreed_words(paths, groups, agree)
+    names: list[str] = []
+    used: Counter = Counter()
+    T = unit(text) if text is not None and len(phrases) else None
+    for g in range(n_groups):
+        phr: list[str] = []
+        word = ""
+        if audio_text is not None and T is not None:
+            m = unit(audio_text[groups == g].mean(axis=0, keepdims=True))[0]
+            s = T @ m
+            order = np.argsort(-s)
+            phr = [signpost(phrases[i]) for i in order[:3]]
+            w = words[g]
+            if w and word_text and w in word_text:
+                bar = s[order[min(heard_rank, len(order)) - 1]]
+                if float(unit(np.asarray(word_text[w])[None])[0] @ m) >= bar:
+                    word = w.capitalize()
         name = word or (phr[0] if phr else f"group {g + 1}")
         if used[name] and not word and len(phr) > 1:
             name = f"{phr[0]}, {phr[1]}"

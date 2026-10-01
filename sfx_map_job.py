@@ -37,7 +37,6 @@ and the map is one JSON object:
      "nn":      [[i, ...], ...]}                   20 nearest, closest first
 """
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -126,23 +125,28 @@ def load_vectors(paths, model=None):
     return ready, np.asarray(vectors, dtype=np.float32)
 
 
-def concept_text(model):
-    """The text vectors for the naming phrases, cached next to the audio
-    vectors so a rerun does not load the model just to read them again."""
+def text_vectors(model, prompts):
+    """Text-tower vectors for `prompts`, in order, or None without a text
+    tower. Kept per prompt in the model's cache folder, so a rerun does not
+    load the model just to read the same phrases again."""
     cache = EmbeddingCache(_space())
-    digest = hashlib.sha1("\n".join(sfxmap.CONCEPTS).encode("utf-8")).hexdigest()[:12]
-    path = cache.dir / f"concepts-{digest}.npy"
-    if path.exists():
+    store = cache.dir / "texts.npz"
+    known = {}
+    if store.exists():
         try:
-            return np.load(path)
+            with np.load(store) as z:
+                known = {k: z[k] for k in z.files}
         except (OSError, ValueError):
-            pass
-    text = model.get().embed_text(sfxmap.CONCEPTS)
-    if text is None:
-        return None
-    text = np.asarray(text, dtype=np.float32)
-    np.save(path, text)
-    return text
+            known = {}
+    missing = [t for t in dict.fromkeys(prompts) if t not in known]
+    if missing:
+        vecs = model.get().embed_text(missing)
+        if vecs is None:
+            return None
+        for t, v in zip(missing, np.asarray(vecs, dtype=np.float32)):
+            known[t] = v
+        np.savez(store, **known)
+    return np.stack([known[t] for t in prompts]).astype(np.float32)
 
 
 def up_to_date(out: Path, ready) -> bool:
@@ -155,8 +159,9 @@ def up_to_date(out: Path, ready) -> bool:
             and set(doc.get("paths", [])) == {str(p) for p in ready})
 
 
-def build(ready, vectors, text):
-    """Everything the map needs, from vectors alone."""
+def build(ready, vectors, model=None):
+    """Everything the map needs, from vectors alone. `model` is only asked for
+    text vectors to name the groups; without it the groups are numbered."""
     from threadpoolctl import threadpool_limits
 
     emit(event="step", detail=f"Arranging {len(ready)} effects by how they sound")
@@ -165,7 +170,17 @@ def build(ready, vectors, text):
     emit(event="step", detail="Grouping sounds that are alike")
     groups = sfxmap.group(vectors)
     emit(event="step", detail="Naming the groups")
-    names = sfxmap.name_groups(ready, groups, sfxmap.text_half(vectors), text)
+    text, word_text = None, None
+    if model is not None:
+        try:
+            text = text_vectors(model, sfxmap.CONCEPTS)
+            words = [w for w in set(sfxmap.agreed_words(ready, groups)) if w]
+            if text is not None and words:
+                word_text = dict(zip(words, text_vectors(model, [sfxmap.word_prompt(w) for w in words])))
+        except Exception as exc:
+            emit(event="step", detail=f"No names from the sound model: {exc}")
+            text, word_text = None, None
+    names = sfxmap.name_groups(ready, groups, sfxmap.text_half(vectors), text, word_text=word_text)
     regions = sfxmap.regions(plane, groups, names)
     emit(event="step", detail="Finding each sound's nearest neighbours")
     nn = sfxmap.nearest(vectors, NEIGHBOURS)
@@ -213,14 +228,9 @@ def main():
             emit(event="step", detail="The effects map is already up to date")
             emit(event="done", placed=len(ready))
             return
-        try:
-            text = concept_text(model)
-        except Exception as exc:
-            emit(event="step", detail=f"No names from the sound model: {exc}")
-            text = None
+        data = build(ready, vectors, model)
     finally:
         model.close()
-    data = build(ready, vectors, text)
     write(out, data)
     emit(event="done", placed=len(ready))
 
