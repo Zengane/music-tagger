@@ -23,6 +23,8 @@ import "core:net"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:sync"
+import "core:thread"
 import "core:time"
 
 PREMIERE_DEFAULT_PORT :: 47821
@@ -39,6 +41,10 @@ zendrop_settings_path :: proc(allocator := context.temp_allocator) -> string {
 // The port Zen Drop is listening on, or the default when it has never been
 // changed. A missing file is not a failure: it means the panel is on defaults.
 premiere_port :: proc() -> int {
+	// For tests against a stand-in panel, never the one Premiere runs.
+	if v, found := os.lookup_env("ZENDROP_PORT", context.temp_allocator); found {
+		if n, parsed := strconv.parse_int(v); parsed && n >= 1024 && n <= 65535 { return n }
+	}
 	path := zendrop_settings_path()
 	if path == "" { return PREMIERE_DEFAULT_PORT }
 
@@ -181,18 +187,38 @@ dechunk :: proc(body: string) -> string {
 
 // True when the panel answers. Used to word the failure properly rather than
 // blaming the wrong thing.
+//
+// Asked at the start of every selection drag, on the drawing thread, so the
+// answer is kept for a few seconds: a panel that is not there costs a
+// connection attempt, and that should not be paid on every drag.
 premiere_available :: proc() -> bool {
+	@(static) last: time.Tick
+	@(static) answer: bool
+	if last != {} && time.tick_since(last) < 5 * time.Second { return answer }
 	body, ok := http_get(premiere_port(), "/ping")
-	return ok && strings.contains(body, "zendrop")
+	answer = ok && strings.contains(body, "zendrop")
+	last = time.tick_now()
+	return answer
 }
 
-// Send a track to the timeline.
+// Send a track to the timeline, in the background.
 //
 // `from` and `to` are seconds into the file; pass 0 and 0 for the whole thing.
 // `mark` is where a marker goes, in the same source time, or a negative number
 // for none. The playhead in Premiere decides where it lands, which is what an
 // editor expects: put the playhead where the sound goes, then send.
-send_to_premiere :: proc(t: ^Track, from, to: f32, mark: f32 = -1) -> (message: string, ok: bool) {
+//
+// It runs on its own thread and reports through a toast when Premiere has
+// actually placed the clip. The panel answers a send with "queued" at once,
+// so the app used to say "sent" for a send that then failed in Premiere
+// (no sequence open, no free track), and a panel that was not there froze
+// the window for the length of the timeout.
+send_to_premiere :: proc(t: ^Track, from, to: f32, mark_in: f32 = -1) {
+	mark := mark_in
+	if premiere_send.busy {
+		toast("still sending the last one to Premiere")
+		return
+	}
 	port := premiere_port()
 
 	q: strings.Builder
@@ -201,26 +227,120 @@ send_to_premiere :: proc(t: ^Track, from, to: f32, mark: f32 = -1) -> (message: 
 	ranged := to > from
 	if ranged {
 		fmt.sbprintf(&q, "&in=%.3f&out=%.3f", from, to)
+	} else if t.duration > 0 {
+		// For placing it when Premiere does not report the file's length.
+		fmt.sbprintf(&q, "&dur=%.3f", t.duration)
 	}
+	// A whole file gets its marker too: the cue, the hit or the drop.
+	if mark < 0 && !ranged && t.duration > 0 { mark = mark_for_range(t, 0, t.duration) }
 	if mark >= 0 {
 		fmt.sbprintf(&q, "&mark=%.3f", mark)
 	}
+	premiere_send.job_id += 1
+	fmt.sbprintf(&q, "&job=%d", premiere_send.job_id)
 
-	body, sent := http_get(port, strings.to_string(q))
+	premiere_send.port   = port
+	premiere_send.query  = strings.clone(strings.to_string(q))
+	premiere_send.label  = ranged ? strings.clone(fmt_time(to - from)) : strings.clone(display_text(t.name))
+	premiere_send.busy   = true
+	premiere_send.done   = false
+	premiere_send.result = ""
+	premiere_send.thread = thread.create_and_start(premiere_send_worker)
+	toast(fmt.tprintf("sending %s to Premiere…", premiere_send.label))
+}
+
+Premiere_Send :: struct {
+	busy:   bool,   // drawing thread only
+	done:   bool,   // atomic: the worker has finished
+	thread: ^thread.Thread,
+	job_id: int,
+	port:   int,
+	query:  string, // owned
+	label:  string, // owned
+	result: string, // owned, written by the worker before `done`
+}
+
+premiere_send: Premiere_Send
+
+// Called once per frame: the answer, when it has come.
+poll_premiere_send :: proc() {
+	if !premiere_send.busy || !sync.atomic_load(&premiere_send.done) { return }
+	thread.join(premiere_send.thread)
+	thread.destroy(premiere_send.thread)
+	toast(premiere_send.result)
+	delete(premiere_send.query)
+	delete(premiere_send.label)
+	delete(premiere_send.result)
+	premiere_send = {job_id = premiere_send.job_id}
+}
+
+@(private)
+premiere_send_worker :: proc() {
+	s := &premiere_send
+	defer sync.atomic_store(&s.done, true)
+	defer free_all(context.temp_allocator)
+
+	body, sent := http_get(s.port, s.query)
 	if !sent {
 		// Two different problems, and the difference is the whole message: a
 		// panel that is not open is a thing to go and open, a refused path is
 		// a thing to look at.
 		if body == "" {
-			return fmt.tprintf("Premiere did not answer on port %d — is the Zen Drop panel open?", port), false
+			s.result = fmt.aprintf("Premiere did not answer on port %d — is the Zen Drop panel open?", s.port)
+		} else {
+			s.result = fmt.aprintf("Premiere refused it: %s", strings.trim_space(body))
 		}
-		return fmt.tprintf("Premiere refused it: %s", strings.trim_space(body)), false
+		return
 	}
 
-	if ranged {
-		return fmt.tprintf("sent %s to Premiere%s", fmt_time(to - from), mark >= 0 ? " with a marker" : ""), true
+	// Then ask until it is placed. Importing a long file can take a while
+	// (Premiere conforms its audio), so this waits up to the panel's own
+	// three minutes.
+	// Not in the temp allocator: that is emptied after every poll below.
+	status := fmt.aprintf("/status?job=%d", s.job_id)
+	defer delete(status)
+	deadline := time.tick_now()
+	for time.tick_since(deadline) < 180 * time.Second {
+		time.sleep(250 * time.Millisecond)
+		answer, known := http_get(s.port, status)
+		answer = strings.trim_space(answer)
+		switch {
+		case !known && answer == "unknown":
+			// An older panel that does not report back: queued is all we know.
+			s.result = fmt.aprintf("sent %s to Premiere", s.label)
+			return
+		case !known:
+			s.result = fmt.aprintf("Premiere stopped answering while placing %s", s.label)
+			return
+		case strings.has_prefix(answer, "done"):
+			detail := strings.trim_space(answer[4:])
+			s.result = detail == "" ? fmt.aprintf("sent %s to Premiere", s.label) : fmt.aprintf("Premiere: %s", detail)
+			return
+		case strings.has_prefix(answer, "failed"):
+			s.result = fmt.aprintf("Premiere could not place %s: %s", s.label, strings.trim_space(answer[6:]))
+			return
+		}
+		free_all(context.temp_allocator)
 	}
-	return fmt.tprintf("sent %s to Premiere", display_text(t.name)), true
+	s.result = fmt.aprintf("Premiere is still busy with %s — see the Zen Drop panel", s.label)
+}
+
+// `--premiere-send <file>`: a whole-file send and then a ranged one, through
+// the same background path the buttons use, printing what the app would say.
+// Point it at a stand-in panel with ZENDROP_PORT.
+run_premiere_send_check :: proc(file: string) -> int {
+	t := Track{path = file, name = path_leaf(file), duration = 12.5}
+	failures := 0
+	for ranged in ([]bool{false, true}) {
+		if ranged { send_to_premiere(&t, 1, 2) } else { send_to_premiere(&t, 0, 0) }
+		for premiere_send.busy {
+			poll_premiere_send()
+			time.sleep(20 * time.Millisecond)
+		}
+		fmt.printf("%s: %s\n", ranged ? "range" : "whole", app.toast)
+		if strings.contains(app.toast, "did not answer") || strings.contains(app.toast, "stopped answering") { failures += 1 }
+	}
+	return failures == 0 ? 0 : 1
 }
 
 // `--premiere [file]`: is the panel there, and what would be sent to it.

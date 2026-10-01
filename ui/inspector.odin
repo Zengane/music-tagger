@@ -106,8 +106,7 @@ draw_inspector :: proc(r: Rect) {
 	if t.kind == .Audio || t.kind == .Video || t.kind == .Image {
 		b := rect(x, y, w, px(30))
 		if button(b, "", .Primary) {
-			message, _ := send_to_premiere(t, 0, 0)
-			toast(message)
+			send_to_premiere(t, 0, 0)
 		}
 		ink := rl.Color{6, 20, 28, 255}
 		label: cstring = "Send to Premiere"

@@ -310,6 +310,16 @@ function zdSelectAt(track, s) {
  * builds refuse the argument entirely, so the one-argument form is the fallback
  * rather than an error.
  */
+/*
+ * Back to the whole file. Premiere reuses the project item when the same file
+ * is sent again, and the item keeps the in/out of the last ranged send: a
+ * whole-track send after a ranged one placed the old range.
+ */
+function zdClearRange(item) {
+    try { item.clearInPoint(); } catch (e) {}
+    try { item.clearOutPoint(); } catch (e2) {}
+}
+
 function zdSetRange(item, inSec, outSec) {
     if (!(outSec > inSec)) { return false; }
     var ok = false;
@@ -389,6 +399,10 @@ function zdPlace(item, opts) {
     try { inT = Number(item.getInPoint().ticks); } catch (e) {}
     try { outT = Number(item.getOutPoint().ticks); } catch (e2) {}
     var dur = outT - inT;
+    /* The sender knows the length; five seconds is only the last resort, and
+       a short guess lets the free-space check pass for a long file whose
+       overwrite then covers later clips. */
+    if (!(dur > 0) && opts.durSeconds > 0) { dur = opts.durSeconds * ZD_TICKS_PER_SECOND; }
     if (!(dur > 0)) { dur = 5 * ZD_TICKS_PER_SECOND; }
     var end = start + dur;
 
@@ -632,7 +646,7 @@ function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, bi
  * mode "timeline" - import and place now.
  * mode "source"   - import and load the Source Monitor, place later.
  */
-function zdDrop(path, mode, binName, fallback, checkAudio, skipLocked, inSec, outSec, markSec) {
+function zdDrop(path, mode, binName, fallback, checkAudio, skipLocked, inSec, outSec, markSec, durSec) {
     try {
         if (!app.project) { return zdFail("No project is open."); }
         var item = zdImport(path, binName);
@@ -641,6 +655,7 @@ function zdDrop(path, mode, binName, fallback, checkAudio, skipLocked, inSec, ou
            from Listary sends. */
         var i0 = zdNum(inSec, -1), i1 = zdNum(outSec, -1), mk = zdNum(markSec, -1);
         if (i0 >= 0 && i1 > i0) { zdSetRange(item, i0, i1); }
+        else { zdClearRange(item); }
 
         if (String(mode) === "source") {
             try {
@@ -656,7 +671,8 @@ function zdDrop(path, mode, binName, fallback, checkAudio, skipLocked, inSec, ou
             checkAudio: zdBool(checkAudio),
             skipLocked: zdBool(skipLocked),
             markSeconds: mk,
-            markName: "hit"
+            markName: "hit",
+            durSeconds: (i0 >= 0 && i1 > i0) ? (i1 - i0) : zdNum(durSec, -1)
         });
     } catch (err) {
         return zdFail(err.toString());

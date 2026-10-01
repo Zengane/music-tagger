@@ -186,6 +186,9 @@ main :: proc() {
 	if len(os.args) > 1 && os.args[1] == "--make-icon" {
 		os.exit(run_make_icon(len(os.args) > 2 ? os.args[2] : ""))
 	}
+	if len(os.args) > 2 && os.args[1] == "--premiere-send" {
+		os.exit(run_premiere_send_check(os.args[2]))
+	}
 	if len(os.args) > 1 && os.args[1] == "--premiere" {
 		os.exit(run_premiere_check(len(os.args) > 2 ? os.args[2] : ""))
 	}
@@ -321,6 +324,7 @@ main :: proc() {
 			poll_filing()
 		poll_music_map()
 		poll_split()
+		poll_premiere_send()
 		// The warm-up finishing is when the rest of the features appear.
 		if _, _, warming := waveform_warmup(); !warming && features_pending {
 			features_pending = false
@@ -1902,10 +1906,8 @@ draw_dock :: proc(r: Rect) {
 		send := rect(rx - send_w, top.y, send_w, px(30))
 		if button(send, "", .Primary) {
 			mark := ranged ? mark_for_range(t, player.sel_start, player.sel_end) : -1
-			message: string
-			if ranged { message, _ = send_to_premiere(t, player.sel_start, player.sel_end, mark) }
-			else      { message, _ = send_to_premiere(t, 0, 0) }
-			toast(message)
+			if ranged { send_to_premiere(t, player.sel_start, player.sel_end, mark) }
+			else      { send_to_premiere(t, 0, 0) }
 		}
 		ink := rl.Color{6, 20, 28, 255}
 		draw_icon(.Send, rect(send.x + px(6), send.y, px(18), send.height), ink)
@@ -2371,9 +2373,7 @@ draw_track_menu :: proc() {
 	case 10:
 		// The whole file, at Premiere's playhead. The selection version is on
 		// the transport bar, where the selection itself is.
-		message, ok := send_to_premiere(t, 0, 0)
-		toast(message)
-		_ = ok
+		send_to_premiere(t, 0, 0)
 
 	case 11:
 		for p in app.delete_paths { delete(p) }

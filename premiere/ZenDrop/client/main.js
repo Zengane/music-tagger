@@ -24,6 +24,21 @@
     var queue = [];
     var busy = false;
 
+    /* What happened to each drop that came with a job id, so the sender can
+       ask (GET /status?job=<id>) instead of taking "queued" for "placed".
+       Only the last few are kept. */
+    var jobs = {};
+    var jobOrder = [];
+
+    function setJob(id, state, message) {
+        if (!id) { return; }
+        if (!jobs.hasOwnProperty(id)) {
+            jobOrder.push(id);
+            if (jobOrder.length > 64) { delete jobs[jobOrder.shift()]; }
+        }
+        jobs[id] = { state: state, message: message || "" };
+    }
+
     var el = {
         log: document.getElementById("log"),
         status: document.getElementById("status"),
@@ -107,17 +122,25 @@
             ? " " + job.in.toFixed(2) + "-" + job.out.toFixed(2) + "s" : "";
         log("drop: " + base + range + " (" + job.mode + ")", "dim");
 
+        setJob(job.id, "running");
         call("zdDrop", [job.path, job.mode, prefs.bin, prefs.fallback, prefs.checkAudio, prefs.skipLocked,
-                        job.in, job.out, job.mark], function (res) {
+                        job.in, job.out, job.mark, job.dur], function (res) {
             busy = false;
+            var said;
             if (!res.ok) {
+                said = res.error;
                 log("FAILED " + base + " - " + res.error, "err");
+                setJob(job.id, "failed", res.error);
             } else if (res.staged) {
-                log("loaded in Source Monitor: " + res.name + " - set in/out, then Place", "ok");
+                said = "loaded in Source Monitor: " + res.name + " - set in/out, then Place";
+                log(said, "ok");
+                setJob(job.id, "done", said);
             } else {
-                log("placed " + res.name + " on " + res.track +
+                said = "placed " + res.name + " on " + res.track +
                     (res.addedTrack ? " (new track)" : "") +
-                    (res.marked ? " + marker" : ""), "ok");
+                    (res.marked ? " + marker" : "");
+                log(said, "ok");
+                setJob(job.id, "done", said);
             }
             refreshStatus();
             pump();
@@ -148,6 +171,16 @@
 
             if (parsed.pathname === "/ping") {
                 res.writeHead(200); res.end("zendrop"); return;
+            }
+
+            /* "queued", "running", "done <message>", "failed <message>",
+               or 404 for a job this panel never saw. */
+            if (parsed.pathname === "/status") {
+                var j = jobs[String(parsed.query.job || "")];
+                if (!j) { res.writeHead(404); res.end("unknown"); return; }
+                res.writeHead(200);
+                res.end(j.state + (j.message ? " " + j.message : ""));
+                return;
             }
 
             /* A drag from another app has landed: trim what Premiere just
@@ -196,9 +229,15 @@
                 if (!isFinite(inSec)) { inSec = -1; }
                 if (!isFinite(outSec)) { outSec = -1; }
                 if (!isFinite(mark)) { mark = -1; }
+                /* The file's length, when the sender knows it, for placing a
+                   whole file whose length Premiere does not report. */
+                var dur = (q.dur === undefined) ? -1 : Number(q.dur);
+                if (!isFinite(dur)) { dur = -1; }
+                var id = String(q.job || "");
 
                 res.writeHead(200); res.end("queued");
-                enqueue({ path: p, mode: mode, in: inSec, out: outSec, mark: mark });
+                setJob(id, "queued");
+                enqueue({ path: p, mode: mode, in: inSec, out: outSec, mark: mark, dur: dur, id: id });
                 return;
             }
 
