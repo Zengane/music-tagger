@@ -570,6 +570,172 @@ function zdTrimDropped(path, inSec, outSec, markSec) {
 }
 
 
+/* ---------- replacing the clip under the drop (Alt held) ---------- */
+
+/*
+ * Premiere's own Alt-drag replace only works for drags that start inside
+ * Premiere. A drop from Windows is a plain overwrite: the placeholder cuts a
+ * hole in the song it lands on, and the rest of that song stays.
+ *
+ * So the app reads Alt itself and does the replace here. Once the drop has
+ * landed there is no way to tell which clip used to be under it - the drop has
+ * already cut it up - so the app asks for this picture of the sequence when
+ * the drag starts, and the swap reads it afterwards.
+ *
+ * Plain data plus the project item: TrackItem objects go stale as soon as the
+ * timeline changes under them.
+ */
+var zdSnap = null;
+
+function zdClipPath(c) {
+    try { return zdNormPath(c.projectItem.getMediaPath()); } catch (e) { return ""; }
+}
+
+function zdSnapshot() {
+    zdSnap = null;
+    try {
+        var seq = app.project ? app.project.activeSequence : null;
+        if (!seq) { return zdFail("No active sequence."); }
+        /* Audio tracks only: the placeholder is always a WAV, and this
+           runs on Premiere's main thread while the user is dragging. */
+        var out = [];
+        var groups = [{ tracks: seq.audioTracks, kind: "audio" }];
+        for (var g = 0; g < groups.length; g++) {
+            var tracks = groups[g].tracks;
+            for (var i = 0; i < tracks.numTracks; i++) {
+                var clips = tracks[i].clips;
+                for (var k = 0; k < clips.numItems; k++) {
+                    var c = clips[k];
+                    var rec = { kind: groups[g].kind, index: i, item: null, path: zdClipPath(c) };
+                    try {
+                        rec.start = Number(c.start.ticks);
+                        rec.end = Number(c.end.ticks);
+                        rec.inT = Number(c.inPoint.ticks);
+                        rec.outT = Number(c.outPoint.ticks);
+                    } catch (eT) { continue; }
+                    try { rec.item = c.projectItem; } catch (eI) {}
+                    out.push(rec);
+                }
+            }
+        }
+        zdSnap = { seq: String(seq.sequenceID), clips: out };
+        return zdJson({ ok: true, clips: out.length });
+    } catch (err) {
+        return zdFail(err.toString());
+    }
+}
+
+function zdOverlap(rec, s, e) {
+    return Math.min(rec.end, e) - Math.max(rec.start, s);
+}
+
+/* The clip that was under most of the placeholder before it landed. */
+function zdOldUnder(seq, hit, s, e, placeholderNorm) {
+    if (!zdSnap || zdSnap.seq !== String(seq.sequenceID)) { return null; }
+    var best = null, bestOverlap = 0;
+    for (var i = 0; i < zdSnap.clips.length; i++) {
+        var rec = zdSnap.clips[i];
+        if (rec.kind !== hit.kind || rec.index !== hit.index) { continue; }
+        if (rec.path === placeholderNorm) { continue; }
+        var o = zdOverlap(rec, s, e);
+        if (o > bestOverlap) { bestOverlap = o; best = rec; }
+    }
+    return best;
+}
+
+/* Remove every clip on the track that `test` picks. Collected first: the
+   collection re-indexes as clips go. Returns how many refused. */
+function zdRemoveClips(track, test) {
+    var doomed = [], clips = track.clips, k;
+    for (k = 0; k < clips.numItems; k++) {
+        try { if (test(clips[k])) { doomed.push(clips[k]); } } catch (e) {}
+    }
+    var refused = 0;
+    for (k = 0; k < doomed.length; k++) {
+        try { doomed[k].remove(false, false); } catch (e2) { refused += 1; }
+    }
+    return refused;
+}
+
+/*
+ * Put back a clip the placeholder covered. Only plain audio: a clip from a
+ * video file would bring its picture along onto a video track.
+ *
+ * What comes back is the same media over the same span. Effects and
+ * keyframes on the original are gone - the drop destroyed them, not this.
+ */
+function zdRestoreClip(track, rec) {
+    if (!rec.item || rec.kind !== "audio" || zdMediaKind(rec.path, true) !== "audio") { return false; }
+    var item = rec.item, oldIn = -1, oldOut = -1, ok = false;
+    try { oldIn = Number(item.getInPoint().seconds); oldOut = Number(item.getOutPoint().seconds); } catch (e) {}
+    if (!zdSetRange(item, rec.inT / ZD_TICKS_PER_SECOND, rec.outT / ZD_TICKS_PER_SECOND)) { return false; }
+    try { track.overwriteClip(item, zdTimeFromTicks(rec.start)); ok = true; } catch (e2) {}
+    if (oldOut > oldIn && oldIn >= 0) { zdSetRange(item, oldIn, oldOut); } else { zdClearRange(item); }
+    return ok;
+}
+
+/*
+ * The replace itself: the new sound takes the old clip's exact slot - same
+ * start, same length - played from the start of the selection. That is what
+ * Premiere's own Alt-replace does, and the edit's timing does not move. A file
+ * that ends before the slot does leaves the rest of the slot empty.
+ */
+function zdReplaceSlot(seq, hit, old, placeholderNorm, realPath, inSec, fileSec, markSec, binName) {
+    var track = hit.track;
+    var ps = Number(hit.clip.start.ticks), pe = Number(hit.clip.end.ticks);
+    var placeholderItem = null;
+    try { placeholderItem = hit.clip.projectItem; } catch (e) {}
+
+    var lenSec = (old.end - old.start) / ZD_TICKS_PER_SECOND;
+    if (fileSec > inSec && inSec + lenSec > fileSec) { lenSec = fileSec - inSec; }
+    var outSec = inSec + lenSec;
+
+    var item = zdImport(realPath, binName);
+    zdSetRange(item, inSec, outSec);
+
+    /* Clear the slot: what is left of the old song, and the placeholder
+       wherever it reaches - it can hang past either end of the slot. */
+    var tb = Number(seq.timebase);
+    var eps = tb > 0 ? tb / 2 : 0;
+    var refused = zdRemoveClips(track, function (c) {
+        var p = zdClipPath(c);
+        if (p === placeholderNorm) { return true; }
+        if (p !== old.path) { return false; }
+        return Number(c.start.ticks) >= old.start - eps && Number(c.end.ticks) <= old.end + eps;
+    });
+
+    track.overwriteClip(item, zdTimeFromTicks(old.start));
+    zdSelectAt(track, old.start);
+
+    /* The drop was an overwrite, so a placeholder longer than the room it
+       landed in cut into the clips next door. Put them back. */
+    var lost = 0;
+    for (var i = 0; i < zdSnap.clips.length; i++) {
+        var rec = zdSnap.clips[i];
+        if (rec === old || rec.kind !== hit.kind || rec.index !== hit.index) { continue; }
+        if (rec.path === placeholderNorm || zdOverlap(rec, ps, pe) <= 0) { continue; }
+        if (!zdRestoreClip(track, rec)) { lost += 1; }
+    }
+
+    try { if (placeholderItem) { placeholderItem.deleteBin(); } } catch (e2) {}
+
+    var marked = false;
+    if (markSec >= inSec && markSec <= outSec) { marked = zdMarkClip(item, markSec, "hit"); }
+
+    return zdJson({
+        ok: true,
+        replaced: true,
+        name: String(item.name),
+        track: (hit.kind === "audio" ? "A" : "V") + (hit.index + 1),
+        marked: marked,
+        refused: refused,
+        lost: lost,
+        startSeconds: old.start / ZD_TICKS_PER_SECOND,
+        durationSeconds: lenSec
+    });
+}
+
+
 /* ---------- swapping a placeholder for the real thing ---------- */
 
 /*
@@ -590,7 +756,13 @@ function zdTrimDropped(path, inSec, outSec, markSec) {
  * If this fails the placeholder simply stays: it is the correct audio, so the
  * worst case is the old behaviour of a rendered clip rather than a broken edit.
  */
-function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, binName) {
+/*
+ * `replace` (Alt was held at the drop): the new sound takes the slot of the
+ * clip it was dropped on - see zdReplaceSlot. `fileSec` is the real file's
+ * length, so a slot longer than what is left of the file is not overrun.
+ * With nothing under the drop, it is an ordinary swap.
+ */
+function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, binName, replace, fileSec) {
     try {
         var seq = app.project ? app.project.activeSequence : null;
         if (!seq) { return zdFail("No active sequence."); }
@@ -598,7 +770,8 @@ function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, bi
         var i0 = zdNum(inSec, -1), i1 = zdNum(outSec, -1), mk = zdNum(markSec, -1);
         if (!(i0 >= 0 && i1 > i0)) { return zdFail("No range was given."); }
 
-        var found = zdMatchingClips(seq, zdNormPath(placeholderPath));
+        var placeholderNorm = zdNormPath(placeholderPath);
+        var found = zdMatchingClips(seq, placeholderNorm);
         if (found.length === 0) {
             return zdFail("The dropped clip is not on the timeline - was it dropped somewhere else?");
         }
@@ -606,6 +779,16 @@ function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, bi
         if (!hit) { return zdFail("Could not tell which clip was just dropped."); }
 
         var startTicks = Number(hit.clip.start.ticks);
+
+        var note = "";
+        if (zdBool(replace)) {
+            var old = zdOldUnder(seq, hit, startTicks, Number(hit.clip.end.ticks), placeholderNorm);
+            if (old) {
+                return zdReplaceSlot(seq, hit, old, placeholderNorm, realPath, i0,
+                                     zdNum(fileSec, -1), mk, binName);
+            }
+            note = zdSnap ? "nothing was under the drop to replace" : "no picture of the timeline from the drag start";
+        }
         var placeholderItem = null;
         try { placeholderItem = hit.clip.projectItem; } catch (e) {}
 
@@ -632,11 +815,15 @@ function zdSwapPlaceholder(placeholderPath, realPath, inSec, outSec, markSec, bi
             name: String(item.name),
             track: (hit.kind === "audio" ? "A" : "V") + (hit.index + 1),
             marked: marked,
+            note: note,
             startSeconds: startTicks / ZD_TICKS_PER_SECOND,
             durationSeconds: i1 - i0
         });
     } catch (err) {
         return zdFail(err.toString());
+    } finally {
+        /* One picture per drag: a later drag must not read this one. */
+        zdSnap = null;
     }
 }
 

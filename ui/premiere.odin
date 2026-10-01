@@ -405,7 +405,11 @@ trim_in_premiere :: proc(t: ^Track, from, to: f32, mark: f32 = -1) -> (message: 
 //
 // Failing is survivable by design: the placeholder is the correct audio, so a
 // refused swap leaves a working edit that happens to use a rendered copy.
-swap_in_premiere :: proc(t: ^Track, placeholder: string, from, to: f32, mark: f32 = -1) -> (message: string, ok: bool) {
+//
+// `replace` (Alt held at the drop): the new sound takes the whole slot of the
+// clip it landed on, played from the selection's start — Premiere's own
+// Alt-replace, which Premiere does not do for a drop from outside.
+swap_in_premiere :: proc(t: ^Track, placeholder: string, from, to: f32, mark: f32 = -1, replace := false) -> (message: string, ok: bool) {
 	if to <= from { return "no selection to place", false }
 	port := premiere_port()
 
@@ -414,6 +418,10 @@ swap_in_premiere :: proc(t: ^Track, placeholder: string, from, to: f32, mark: f3
 	fmt.sbprintf(&q, "/swap?placeholder=%s&path=%s&in=%.3f&out=%.3f",
 	             url_encode(placeholder), url_encode(t.path), from, to)
 	if mark >= 0 { fmt.sbprintf(&q, "&mark=%.3f", mark) }
+	if replace {
+		strings.write_string(&q, "&replace=1")
+		if t.duration > 0 { fmt.sbprintf(&q, "&dur=%.3f", t.duration) }
+	}
 
 	body, sent := http_get(port, strings.to_string(q))
 	if !sent {
@@ -422,7 +430,16 @@ swap_in_premiere :: proc(t: ^Track, placeholder: string, from, to: f32, mark: f3
 		}
 		return fmt.tprintf("dropped, but the swap was refused: %s", strings.trim_space(body)), false
 	}
+	if replace { return "dropped with Alt — replacing the clip under it", true }
 	return fmt.tprintf("dropped %s — swapping in the original", fmt_time(to - from)), true
+}
+
+// Ask the panel to note what the timeline holds before a drag starts. After
+// the drop it is too late: the drop has already cut the clip it landed on,
+// and only this picture says what was there. Best effort — without it an Alt
+// drop is an ordinary swap.
+premiere_snapshot :: proc() {
+	http_get(premiere_port(), "/snapshot")
 }
 
 // Where the marker goes for a given range.

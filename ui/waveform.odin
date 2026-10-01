@@ -606,9 +606,13 @@ start_selection_drag :: proc() {
 			app.clip_path = path
 		}
 
+		// Alt can be pressed at any point in the drag, so the picture is
+		// taken every time.
+		premiere_snapshot()
 		if drag_files({app.clip_path}) {
 			message, _ := swap_in_premiere(t, app.clip_path,
-			                               player.sel_start, player.sel_end, mark)
+			                               player.sel_start, player.sel_end, mark,
+			                               replace = drag_alt_at_drop)
 			toast(message)
 		}
 		ui.held     = false

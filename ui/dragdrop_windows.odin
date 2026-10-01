@@ -51,6 +51,7 @@ import win32 "core:sys/windows"
 
 @(private) MK_LBUTTON :: 0x0001
 @(private) MK_RBUTTON :: 0x0002
+@(private) MK_ALT     :: 0x0020
 
 @(private)
 FORMATETC :: struct {
@@ -141,7 +142,10 @@ drop_source_release :: proc "system" (this: rawptr) -> win32.ULONG {
 drop_source_continue :: proc "system" (this: rawptr, escape: win32.BOOL, keys: win32.DWORD) -> win32.HRESULT {
 	if escape || (keys & MK_RBUTTON) != 0 { return DRAGDROP_S_CANCEL }
 	// The button coming up is the drop. Until then, keep going.
-	if (keys & MK_LBUTTON) == 0 { return DRAGDROP_S_DROP }
+	if (keys & MK_LBUTTON) == 0 {
+		drag_alt_at_drop = (keys & MK_ALT) != 0
+		return DRAGDROP_S_DROP
+	}
 	return S_OK_HR
 }
 
@@ -428,6 +432,10 @@ ensure_ole_initialised :: proc() -> bool {
 
 drag_in_progress: bool
 
+// Alt was down when the button came up. Premiere ignores Alt on a drop from
+// outside, so the app reads it and asks the panel for the replace itself.
+drag_alt_at_drop: bool
+
 // Hands `paths` to Windows as a file drag.
 //
 // Blocks until the drop lands or is cancelled: `DoDragDrop` runs its own
@@ -436,6 +444,7 @@ drag_files :: proc(paths: []string) -> bool {
 	// Nothing may draw while this runs; see `Live_Resize.dragging`.
 	begin_drag_loop()
 	defer end_drag_loop()
+	drag_alt_at_drop = false
 
 	if len(paths) == 0 { return false }
 	if drag_in_progress  { return false }

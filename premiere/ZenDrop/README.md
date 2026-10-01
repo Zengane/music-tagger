@@ -67,6 +67,29 @@ instead of placing it. Set in/out there, then press **Place from Source Monitor*
 in the panel (or run `ZenDropSend.exe --place`). The clip lands with the trimmed
 length, using the same free-track rule.
 
+## Alt-drop from Music Tagger: replace a clip
+
+Premiere's own Alt-drag replace works only for drags that start inside
+Premiere. A drop from Windows is a plain overwrite, so the old song stays
+around the new piece.
+
+Music Tagger does the replace itself:
+
+1. When a selection drag starts, the app calls `GET /snapshot`. The panel
+   records the clips on every audio track (`zdSnapshot`).
+2. The app reads Alt when the mouse button comes up. With Alt, it sends
+   `/swap?...&replace=1&dur=<file length>`.
+3. `zdSwapPlaceholder` finds the clip that was under most of the placeholder
+   in the snapshot. The new sound takes that clip's slot: same start, same
+   length, played from the start of the selection. A file that ends sooner
+   leaves the rest of the slot empty.
+4. Clips next to the slot that the placeholder cut are put back, if they are
+   plain audio files. Their effects and keyframes are lost (the drop cut
+   them). The panel logs any it could not put back.
+5. Nothing under the drop, or no snapshot: an ordinary swap.
+
+The snapshot is used once and then cleared.
+
 ## Rebuilding the bridge
 
 ```

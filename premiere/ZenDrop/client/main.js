@@ -203,7 +203,18 @@
                 }
                 res.writeHead(200); res.end("ok");
                 doSwap(String(sq.placeholder), String(sq.path),
-                       Number(sq["in"]), Number(sq.out), Number(sq.mark));
+                       Number(sq["in"]), Number(sq.out), Number(sq.mark),
+                       sq.replace === "1", Number(sq.dur));
+                return;
+            }
+
+            /* A drag is starting: remember what the timeline holds, so an
+               Alt drop can tell which clip it landed on. */
+            if (parsed.pathname === "/snapshot") {
+                res.writeHead(200); res.end("ok");
+                call("zdSnapshot", [], function (r) {
+                    if (!r.ok) { log("snapshot failed - " + r.error, "err"); }
+                }, 30000);
                 return;
             }
 
@@ -288,19 +299,31 @@
         }, 60000);
     }
 
-    function doSwap(placeholder, path, inSec, outSec, mark) {
+    function doSwap(placeholder, path, inSec, outSec, mark, replace, dur) {
         var base = path.replace(/^.*[\\\/]/, "");
         if (!isFinite(mark)) { mark = -1; }
-        log("swap: " + base + " " + inSec.toFixed(2) + "-" + outSec.toFixed(2) + "s", "dim");
+        if (!isFinite(dur)) { dur = -1; }
+        log((replace ? "replace: " : "swap: ") + base + " " + inSec.toFixed(2) + "-" + outSec.toFixed(2) + "s", "dim");
 
-        call("zdSwapPlaceholder", [placeholder, path, inSec, outSec, mark, prefs.bin],
+        call("zdSwapPlaceholder", [placeholder, path, inSec, outSec, mark, prefs.bin, replace, dur],
              function (res) {
                  if (!res.ok) {
                      log("kept the rendered clip - " + res.error, "err");
+                 } else if (res.replaced) {
+                     log("replaced the clip on " + res.track + " with " + res.name + " (" +
+                         res.durationSeconds.toFixed(2) + "s)" +
+                         (res.marked ? " + marker" : ""), "ok");
+                     if (res.lost > 0) {
+                         log(res.lost + " clip(s) next to it were cut by the drop and could not be put back", "err");
+                     }
+                     if (res.refused > 0) {
+                         log(res.refused + " leftover piece(s) could not be removed", "err");
+                     }
                  } else {
                      log("placed " + res.name + " on " + res.track + " (" +
                          res.durationSeconds.toFixed(2) + "s)" +
-                         (res.marked ? " + marker" : ""), "ok");
+                         (res.marked ? " + marker" : "") +
+                         (res.note ? " - " + res.note : ""), "ok");
                  }
              }, 120000);
     }

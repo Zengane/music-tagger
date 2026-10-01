@@ -157,6 +157,9 @@ file_uri :: proc(path: string, allocator := context.temp_allocator) -> string {
 
 // ── drag out ────────────────────────────────────────────────────────────────
 
+// Never set here: there is no drop to read it from.
+drag_alt_at_drop: bool
+
 // No drag source on this platform yet. The files go on the clipboard, so the
 // gesture still gets them somewhere: paste into the other app.
 drag_files :: proc(paths: []string) -> bool {
