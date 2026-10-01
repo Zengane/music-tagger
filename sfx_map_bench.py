@@ -116,10 +116,10 @@ if not args.quick:
 
 print("\ngroups")
 t0 = time.time(); G = sfxmap.group(X)
-grouping(G, f"agglomerative ~40 per group (the app, {time.time()-t0:.0f}s)")
+grouping(G, f"ward ~40 per group (the app, {time.time()-t0:.0f}s)")
 if not args.quick:
     for size in (15, 80):
-        grouping(sfxmap.group(X, size=size), f"agglomerative ~{size} per group")
+        grouping(sfxmap.group(X, size=size), f"ward ~{size} per group")
     from sklearn.cluster import HDBSCAN
     from sklearn.decomposition import PCA
     R = sfxmap.unit(PCA(50, random_state=0).fit_transform(sfxmap.unit(X)))

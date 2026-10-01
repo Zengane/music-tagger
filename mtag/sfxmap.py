@@ -96,9 +96,15 @@ def group(X: np.ndarray, size: int = 40) -> np.ndarray:
     """Groups of effects that sound alike: one label per effect, biggest
     group first.
 
-    Agglomerative clustering on cosine distance, cut to about one group per
-    `size` effects. Every effect gets a group; there is no "noise" bucket,
-    because on a map an unlabelled dot is a dot nobody can find.
+    Ward clustering on unit vectors (where distance follows cosine), cut to
+    about one group per `size` effects. Every effect gets a group; there is no
+    "noise" bucket, because on a map an unlabelled dot is a dot nobody can
+    find. Measured on the bench with general CLAP vectors, ~164 groups:
+
+                          pure   whole   biggest group
+        ward              83.2%  78.3%   154
+        average linkage   73.8%  79.7%   458, and one-sound groups
+        HDBSCAN           97%    71%     but 2 of 3 sounds in no group
     """
     from sklearn.cluster import AgglomerativeClustering
     from sklearn.decomposition import PCA
@@ -111,8 +117,7 @@ def group(X: np.ndarray, size: int = 40) -> np.ndarray:
     k = min(k, n)
     comps = int(min(50, n - 1, U.shape[1]))
     R = unit(PCA(n_components=comps, random_state=0).fit_transform(U))
-    labels = AgglomerativeClustering(n_clusters=k, metric="cosine",
-                                     linkage="average").fit_predict(R)
+    labels = AgglomerativeClustering(n_clusters=k, linkage="ward").fit_predict(R)
     counts = Counter(labels.tolist())
     order = {g: i for i, (g, _) in enumerate(sorted(counts.items(), key=lambda c: (-c[1], c[0])))}
     return np.array([order[g] for g in labels], dtype=np.int32)
