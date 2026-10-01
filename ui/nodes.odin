@@ -664,7 +664,7 @@ draw_map_mode_switch :: proc(r: Rect) {
 	caption: cstring = "placed by what was measured"
 	if nodes.source == .Model { caption = "placed by how the model hears them" }
     if search.kind == .Effects {
-        caption = nodes.source == .Semantic ? fmt.ctprintf("grouped by how they sound (%s) Â· click a sound, then Right / Left to hop to the nearest", sfx_extra.encoder == "" ? "sound model" : sfx_extra.encoder) : "placed by what was measured - sort them by sound for groups and neighbours"
+        caption = nodes.source == .Semantic ? "grouped by how they sound Â· click one, then Right / Left to hop to the nearest" : "placed by what was measured - sort them by sound for groups and neighbours"
     }
 	draw_text(.Regular, caption, x, y + px(3), FS_SMALL, TEXT_FAINT)
 	y += px(20)

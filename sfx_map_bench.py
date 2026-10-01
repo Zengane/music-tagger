@@ -45,12 +45,12 @@ from mtag.dataset import EmbeddingCache
 from mtag import sfxmap
 
 ap = argparse.ArgumentParser()
-ap.add_argument("space", nargs="?", default=None, help="cache name (default: the profile's sound model)")
+ap.add_argument("space", nargs="?", default=None, help="cache name (default: the one the effects map uses)")
 ap.add_argument("--quick", action="store_true", help="only the encoder, the app's plane and the app's groups")
 args = ap.parse_args()
 if args.space is None:
-    from mtag.profiles import audio_text_space
-    args.space = audio_text_space()
+    from sfx_map_job import SPACE
+    args.space = SPACE
 
 bench = json.loads((ROOT / "work/sfx_bench.json").read_text(encoding="utf-8"))
 family_of = {str(Path(p)).lower(): fam for fam, ps in bench.items() for p in ps}

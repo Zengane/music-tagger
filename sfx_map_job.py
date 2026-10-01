@@ -4,10 +4,10 @@ r"""Sort the sound effects by how they sound: one job, started from the map.
 
 What it does, in order, and what each step costs on a second run:
 
-  1. Embed every effect with the profile's sound model (PE-AV on Balanced and
-     Best, general CLAP on Fast). One model, loaded once, over every file that
-     is not cached yet. Cached per file (`mtag/dataset.py`), so a rerun only
-     embeds what is new.
+  1. Embed every effect with general CLAP, whatever the profile (see
+     `SPACE`). One model, loaded once, over every file that is not cached
+     yet. Cached per file (`mtag/dataset.py`), so a rerun only embeds what is
+     new.
   2. Lay them out on a plane (PCA + t-SNE, the music map's own recipe).
   3. Group them (agglomerative clustering on cosine distance) and name each
      group from the audio, or from a filename word its files agree on.
@@ -48,24 +48,38 @@ from mtag import sfxmap
 
 NEIGHBOURS = 20
 
+# The model the effects map listens with: general CLAP on every profile.
+#
+# Measured 2026-10-01 on the bench's 1057 labelled effects (nearest of the
+# 1057, top1 / share of top5 from the same family):
+#
+#     general CLAP (laion/clap-htsat-unfused)      71.9%   57.6%
+#     PE-AV small                                  67.5%   54.9%
+#     PE-AV large                                  67.0%   54.5%
+#     CLAP 0.7 + PE-AV large, fused                73.1%   58.1%
+#
+# PE-AV is the better search-by-description model, but for "which effect
+# sounds like this one" general CLAP is better, and fusing in PE-AV gains about
+# one point (inside the noise for this many files) for half an hour of GPU
+# per library. Trimming short effects instead of padding them to 10 s did not
+# change PE-AV's score either (67.5% against 67.3% for small).
+SPACE = "clap-sfx-v1"
+
 
 def emit(**event):
     print(json.dumps(event), flush=True)
 
 
 def _encoder():
-    """The profile's sound-and-text model (mtag/profiles.py)."""
-    from mtag.encoders import audio_text_encoder
+    from mtag.encoders import ENCODERS
 
-    return audio_text_encoder()
+    return ENCODERS[SPACE]()
 
 
 def _space():
     # Named without importing the encoders: a fully cached map never loads
     # torch at all.
-    from mtag.profiles import audio_text_space
-
-    return audio_text_space()
+    return SPACE
 
 
 class Model:
