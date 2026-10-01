@@ -2893,4 +2893,26 @@ test_sfx_semantic_layout :: proc() {
     nodes.dots[0].lit=true
     frame_nodes(rect(0,0,800,600),true)
     check("focus matches centers the matching sound",abs(nodes.pan.x+nodes.dots[0].pos.x)<0.01)
+
+    // Neighbours: rows 0..3 are effect-0..3; each one's nearest are the
+    // others in order. Hopping goes to the nearest unheard one, Left goes back.
+    old_extra,old_hop,old_app:=sfx_extra,sfx_hop,app
+    defer { sfx_extra=old_extra;sfx_hop=old_hop;app=old_app }
+    sfx_extra={k=2}; sfx_hop={}
+    defer { delete(sfx_extra.row_of);delete(sfx_extra.row_key);delete(sfx_extra.nn);delete(sfx_extra.track_of_row);delete(sfx_extra.group_name);delete(sfx_hop.trail) }
+    near:=[4][2]i32{{1,2},{0,2},{1,0},{2,1}}
+    for i in 0..<4 {
+        key:=path_key(fmt.tprintf("effect-%d.wav",i))
+        sfx_extra.row_of[key]=i; append(&sfx_extra.row_key,key); append(&sfx_extra.group_name,"")
+        append(&sfx_extra.nn,near[i][0],near[i][1])
+    }
+    n:=sfx_neighbours(0)
+    check("an effect's nearest sounds come back closest first",len(n)==2 && n[0]==1 && n[1]==2)
+    app.selected=0
+    sfx_hop_step(1)
+    check("Right hops to the nearest sound",app.selected==1)
+    sfx_hop_step(1)
+    check("Right skips sounds already heard",app.selected==2)
+    sfx_hop_step(-1)
+    check("Left goes back one hop",app.selected==1)
 }
