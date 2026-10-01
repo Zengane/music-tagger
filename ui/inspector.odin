@@ -101,6 +101,24 @@ draw_inspector :: proc(r: Rect) {
 		y += px(34) * f32((len(facts) + 1) / 2) + px(6)
 	}
 
+	// Send the whole file to Premiere, for anything Premiere can place. The
+	// player has the same button, which sends a selection when there is one.
+	if t.kind == .Audio || t.kind == .Video || t.kind == .Image {
+		b := rect(x, y, w, px(30))
+		if button(b, "", .Primary) {
+			message, _ := send_to_premiere(t, 0, 0)
+			toast(message)
+		}
+		ink := rl.Color{6, 20, 28, 255}
+		label: cstring = "Send to Premiere"
+		lw := text_w(.Regular, label, FS_BODY)
+		lx := b.x + (b.width - lw - px(24)) * 0.5
+		draw_icon(.Send, rect(lx, b.y, px(18), b.height), ink)
+		draw_text_mid(.Regular, label, lx + px(24), b.y, b.height, FS_BODY, ink)
+		tip(b, "Place the whole file on Premiere's timeline, at the playhead (needs the Zen Drop panel open)")
+		y += px(40)
+	}
+
 	// What it shows and says.
 	if t.caption != "" || t.ocr != "" {
 		hline(x, y, w)

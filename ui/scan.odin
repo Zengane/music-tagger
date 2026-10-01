@@ -22,6 +22,16 @@ Scan_Request :: struct {
 	additive: bool,
 	library_root: string,
 	folders: []string,
+	// Measurements the open library already holds, by path key. A file whose
+	// size and date still match keeps them instead of having its waveform
+	// file read again: on 8700 tracks those reads were most of a launch.
+	known: map[string]Known_Features,
+}
+
+Known_Features :: struct {
+	size, mtime: i64,
+	features:    Features,
+	duration:    f32,
 }
 
 Scan_State :: struct {
@@ -63,6 +73,11 @@ start_scan :: proc(root: string, recursive := true, include_sfx := false, additi
 	} else if !additive {
 		scan.request.folders = snapshot_folders(root)
 	}
+	scan.request.known = make(map[string]Known_Features, len(lib.tracks))
+	for &t in lib.tracks {
+		if t.kind != .Audio || !t.features.valid { continue }
+		scan.request.known[path_key(t.path, context.allocator)] = Known_Features{t.size, t.mtime, t.features, t.duration}
+	}
 	scan.save_epoch = sidecar_saves
 	scan.running = true
 	scan.done    = false
@@ -85,6 +100,7 @@ poll_scan :: proc() -> (finished: bool) {
 	defer delete(scan.request.library_root)
 	defer delete(scan.request.folders)
 	defer { for p in scan.request.folders { delete(p) } }
+	defer { for k in scan.request.known { delete(k) }; delete(scan.request.known); scan.request.known = nil }
 	if scan.err == "" {
 		same := path_equal(lib.root, scan.result.root) || scan.request.additive
 		if same { merge_scan_result() } else {
@@ -211,7 +227,14 @@ scan_worker :: proc() {
 	for &t in out.tracks {
 		// Only audio has a waveform. A stale entry for a video, left from
 		// before that rule, gave clips durations that were not theirs.
-		if t.kind == .Audio && peaks_cache_valid(peak_key_of(&t)) {
+		if t.kind != .Audio { continue }
+		if k, ok := scan.request.known[path_key(t.path)]; ok && k.size == t.size && k.mtime == t.mtime {
+			t.features = k.features
+			t.duration = k.duration
+			free_all(context.temp_allocator)
+			continue
+		}
+		if peaks_cache_valid(peak_key_of(&t)) {
 			if peaks, ok := peaks_load(&t); ok {
 				t.features = peaks.features
 				t.duration = peaks.duration

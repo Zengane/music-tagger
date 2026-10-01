@@ -1873,43 +1873,57 @@ draw_dock :: proc(r: Rect) {
 	draw_text_mid(.Regular, time_label, rx - tw, top.y, row_h, FS_SMALL, TEXT_DIM)
 	rx -= tw + px(GAP * 2)
 
+	// Where the transport ends: nothing on the right may cross this.
+	limit := cx + bs * 3.3 + px(GAP * 2)
+
+	// Send to Premiere, always there while a track is loaded. A selection
+	// sends the selection; no selection sends the whole track. It used to
+	// appear only once a span was dragged out, so sending a whole track meant
+	// selecting all of it first.
+	if player.track >= 0 && player.track < len(lib.tracks) {
+		t := &lib.tracks[player.track]
+		ranged := has_selection()
+		label := ranged ? fmt.ctprintf("Premiere  %s", fmt_time(player.sel_end - player.sel_start)) : cstring("Premiere")
+		send_w := px(30) + text_w(.Regular, label, FS_BODY) + px(12)
+		wide := rx - send_w - px(6) >= limit
+		if !wide { send_w = px(30) }
+		send := rect(rx - send_w, top.y, send_w, px(30))
+		if button(send, "", .Primary) {
+			mark := ranged ? mark_for_range(t, player.sel_start, player.sel_end) : -1
+			message: string
+			if ranged { message, _ = send_to_premiere(t, player.sel_start, player.sel_end, mark) }
+			else      { message, _ = send_to_premiere(t, 0, 0) }
+			toast(message)
+		}
+		ink := rl.Color{6, 20, 28, 255}
+		draw_icon(.Send, rect(send.x + px(6), send.y, px(18), send.height), ink)
+		if wide { draw_text_mid(.Regular, label, send.x + px(28), send.y, send.height, FS_BODY, ink) }
+		tip(send, ranged ? "Send the selection to Premiere's timeline, at the playhead. Handles stay, so you can trim back out." : "Send the whole track to Premiere's timeline, at the playhead. Drag across the waveform first to send only part of it.")
+		rx = send.x - px(8)
+	}
+
 	if has_selection() {
-		// The selection's controls, as icons.
-		//
-		// Three words and two numbers used to live here — "drag: range",
-		// "Export 0:41", "To Premiere" — and on a narrower window they walked
-		// straight into the transport in the middle of the bar. Icons say the
-		// same things in a third of the room, and a tooltip says the rest for
-		// anyone who has not met them yet.
+		// What the selection can also do. Words where there is room, icons
+		// where there is not: "Save clip" and "Drag: Range / Clip" read at a
+		// glance, and the icons alone did not (two arrows and a pair of
+		// scissors said nothing about dragging).
 		bs := px(30)
 		by := top.y
 
-		// Send: the whole reason the selection exists.
-		if player.track >= 0 && player.track < len(lib.tracks) {
-			send := rect(rx - bs, by, bs, bs)
-			if hovered(send) { fill_round(send, PANEL_3, 6); ui.hover_cursor = .POINTING_HAND }
-			fill_round(send, ACCENT_DK, 5)
-			// An arrow going into a tray: this puts the selection somewhere
-			// else. The drag toggle beside it used the same share icon, and
-			// two different things wearing one picture is worse than either
-			// picture being wrong.
-			draw_icon(.Import, send, ACCENT)
-			tip(send, "Place this selection on Premiere's timeline, at the playhead")
-			if clicked_in(send) {
-				t := &lib.tracks[player.track]
-				mark := mark_for_range(t, player.sel_start, player.sel_end)
-				message, _ := send_to_premiere(t, player.sel_start, player.sel_end, mark)
-				toast(message)
-			}
-			rx = send.x - px(6)
-		}
+		// Save clip: write the selection out as its own audio file.
+		clip_label: cstring = "Save clip"
+		ew := px(30) + text_w(.Regular, clip_label, FS_BODY) + px(10)
+		drag_lead: cstring = "Drag:"
+		seg := text_w(.Regular, "Range", FS_SMALL) + px(16)
+		mw := text_w(.Regular, drag_lead, FS_SMALL) + px(8) + seg * 2
+		words := rx - ew - px(6) - mw >= limit
+		if !words { ew = bs }
 
-		// Export: write it out as its own file.
-		export := rect(rx - bs, by, bs, bs)
+		export := rect(rx - ew, by, ew, bs)
 		if hovered(export) { fill_round(export, PANEL_3, 6); ui.hover_cursor = .POINTING_HAND }
-
-		draw_icon(.Export, export, TEXT_DIM)
-		tip(export, fmt.tprintf("Render this %s out as its own audio file",
+		draw_icon(.Export, rect(export.x + (words ? px(4) : 0), export.y, bs, bs), TEXT_DIM)
+		if words { draw_text_mid(.Regular, clip_label, export.x + px(30), export.y, export.height, FS_BODY, TEXT_DIM) }
+		tip(export, fmt.tprintf("Save this %s as its own audio file, next to the app's clips",
 		                        fmt_time(player.sel_end - player.sel_start)))
 		if clicked_in(export) {
 			if path, ok := export_selection(); ok {
@@ -1920,24 +1934,33 @@ draw_dock :: proc(r: Rect) {
 		}
 		rx = export.x - px(6)
 
-		// What a drag carries: the range, or a rendered clip. Two icons in one
-		// pill, the lit one being what happens.
-		half := px(30)
-		mb := rect(rx - half * 2, by, half * 2, bs)
-		fill_round(mb, PANEL, 6)
-
-
+		// What dragging the selection out of the app carries: the range (the
+		// whole file, placed as the selection) or a clip rendered from it.
 		on := app.drag_as_range
-		lit := rect(on ? mb.x + px(1) : mb.x + half, mb.y + px(1), half - px(1), mb.height - px(2))
-		fill_round(lit, ACCENT_DK, 5)
-
-		// A span with two ends against a pair of scissors: the whole file with
-		// in and out points, or the piece cut out of it.
-		draw_icon(.Span, rect(mb.x, mb.y, half, mb.height), on ? ACCENT : TEXT_FAINT)
-		draw_icon(.Scissors, rect(mb.x + half, mb.y, half, mb.height), on ? TEXT_FAINT : ACCENT)
+		mode_tip := on ? "Dragging the selection out carries a range: Premiere imports the whole file and places only your selection, handles intact. Click for a rendered clip instead." : "Dragging the selection out carries a clip: only the selection is rendered out, as its own file. Click for a range instead."
+		mb: Rect
+		if words {
+			mb = rect(rx - mw, by, mw, bs)
+			lead_w := text_w(.Regular, drag_lead, FS_SMALL) + px(8)
+			draw_text_mid(.Regular, drag_lead, mb.x, mb.y, mb.height, FS_SMALL, TEXT_FAINT)
+			pill := rect(mb.x + lead_w, mb.y, seg * 2, bs)
+			fill_round(pill, PANEL, 6)
+			lit := rect(on ? pill.x + px(1) : pill.x + seg, pill.y + px(1), seg - px(1), pill.height - px(2))
+			fill_round(lit, ACCENT_DK, 5)
+			rw := text_w(.Regular, "Range", FS_SMALL)
+			cw := text_w(.Regular, "Clip", FS_SMALL)
+			draw_text_mid(.Regular, "Range", pill.x + (seg - rw) * 0.5, pill.y, pill.height, FS_SMALL, on ? ACCENT : TEXT_FAINT)
+			draw_text_mid(.Regular, "Clip", pill.x + seg + (seg - cw) * 0.5, pill.y, pill.height, FS_SMALL, on ? TEXT_FAINT : ACCENT)
+		} else {
+			half := px(30)
+			mb = rect(rx - half * 2, by, half * 2, bs)
+			fill_round(mb, PANEL, 6)
+			lit := rect(on ? mb.x + px(1) : mb.x + half, mb.y + px(1), half - px(1), mb.height - px(2))
+			fill_round(lit, ACCENT_DK, 5)
+			draw_icon(.Span, rect(mb.x, mb.y, half, mb.height), on ? ACCENT : TEXT_FAINT)
+			draw_icon(.Scissors, rect(mb.x + half, mb.y, half, mb.height), on ? TEXT_FAINT : ACCENT)
+		}
 		if hovered(mb) { ui.hover_cursor = .POINTING_HAND }
-
-		mode_tip := on ? "A drag carries a range: Premiere imports the whole file and places only your selection, handles intact" : "A drag carries a clip: only the selection is rendered out, as its own file"
 		tip(mb, mode_tip)
 
 		if clicked_in(mb) {
@@ -1945,9 +1968,9 @@ draw_dock :: proc(r: Rect) {
 			// The rendered file and the range file are not interchangeable.
 			if app.clip_path != "" { delete(app.clip_path); app.clip_path = "" }
 			if app.drag_as_range {
-				toast("range: Premiere imports the whole file and places the selection")
+				toast("drag carries a range: Premiere imports the whole file and places the selection")
 			} else {
-				toast("clip: only the selection is rendered out")
+				toast("drag carries a clip: only the selection is rendered out")
 			}
 		}
 		rx = mb.x - px(8)

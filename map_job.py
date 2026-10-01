@@ -121,16 +121,28 @@ def load_vectors(paths: list[Path], embed_missing: bool):
     emit(event="scan", total=len(paths), cached=len(ready), missing=len(missing))
 
     if missing and embed_missing:
+        # Model-major, through `prefill`: one encoder on the GPU at a time.
+        # Embedding file by file keeps all three resident, which overflows an
+        # 8 GiB card and runs about forty times slower (see FusionEncoder).
         enc = FusionEncoder()
-        for i, p in enumerate(missing):
+        failed: set[str] = set()
+
+        def progress(part, i, n, path, error):
+            if error:
+                failed.add(str(path))
+                emit(event="error", path=str(path), message=f"{part}: {error}")
+            if n and (i == 1 or i == n or i % 10 == 0):
+                emit(event="embed", part=part, done=i, total=n)
+
+        enc.prefill(missing, progress)
+        for p in missing:
+            if str(p) in failed:
+                continue
             try:
-                vectors.append(enc.embed_file(p))
+                vectors.append(enc.embed_file(p))  # all cached now: no GPU
                 ready.append(p)
             except Exception as exc:  # a file the decoder will not open
                 emit(event="error", path=str(p), message=str(exc))
-                continue
-            if i % 10 == 0 or i == len(missing) - 1:
-                emit(event="embed", done=i + 1, total=len(missing))
 
     return ready, np.asarray(vectors, dtype=np.float32)
 

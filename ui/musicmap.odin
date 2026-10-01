@@ -150,12 +150,28 @@ start_music_map :: proc() {
 		return
 	}
 
+	// Music only. Walking the library folder also picked up every sound
+	// effect, and each one went through all three music encoders: on a
+	// library with 6181 effects and 2120 already-embedded tracks, that turned
+	// a ten-second layout into a job of many hours, for dots the music map
+	// never draws.
+	paths := make([dynamic]string, 0, len(lib.tracks), context.temp_allocator)
+	for t in lib.tracks {
+		if t.kind == .Audio && !t.is_sfx { append(&paths, t.path) }
+	}
+	if len(paths) < 4 { toast("At least four music tracks are needed"); return }
+	list := join_path({cache_dir("jobs"), "music-map-paths.txt"})
+	if os.write_entire_file(list, transmute([]byte)strings.join(paths[:], "\n", context.temp_allocator)) != nil {
+		toast("Could not write the map's track list")
+		return
+	}
+
 	// `--embed-missing` is the whole reason this is a button rather than a
 	// thing that happens quietly: a track the model has never heard has to go
 	// through the encoders, which loads them onto the GPU and takes real time.
-	// Tracks already embedded during training cost nothing.
+	// Tracks already embedded during tagging or training cost nothing.
 	stream, ok := stream_start({
-		python_exe(), map_script(), "--library", lib.root, "--embed-missing",
+		python_exe(), map_script(), "--paths-from", list, "--embed-missing",
 	}, project_root())
 	if !ok {
 		toast(fmt.tprintf("could not start %s", python_exe()))
@@ -166,6 +182,7 @@ start_music_map :: proc() {
 	map_job.running = true
 	map_job.failed  = false
 	map_job.placed  = 0
+	clear(&map_job.partial)
 	set_owned(&map_job.detail, "reading the model")
 }
 
@@ -248,7 +265,8 @@ handle_map_line :: proc(line: string) {
 	case "embed":
 		done, _ := as_number(obj["done"])
 		total, _ := as_number(obj["total"])
-		set_owned(&map_job.detail, fmt.tprintf("embedding %d of %d", int(done), int(total)))
+		part, _ := obj["part"].(json.String)
+		set_owned(&map_job.detail, fmt.tprintf("listening with %s: %d of %d", part, int(done), int(total)))
 	case "step":
 		detail, _ := obj["detail"].(json.String)
 		set_owned(&map_job.detail, detail)
@@ -256,6 +274,9 @@ handle_map_line :: proc(line: string) {
 		placed, _ := as_number(obj["placed"])
 		map_job.placed = int(placed)
 	case "error":
+		// One file the decoder will not open is left off the map; only an
+		// error without a path ends the job.
+		if _, per_file := obj["path"]; per_file { return }
 		message, _ := obj["message"].(json.String)
 		map_job.failed = true
 		set_owned(&map_job.detail, message)
