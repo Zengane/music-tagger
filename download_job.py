@@ -166,6 +166,18 @@ def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str, pat
     for e, parsed in zip(entries, guess_tracks(entries, guess["name"], pattern)):
         e["original"] = e["title"]
         e.update(parsed)  # title, artist, track, disc: what the tags will say
+    # A whole soundtrack in one video, with chapters: each chapter is a track.
+    chapters = []
+    if not is_list and len(info.get("chapters") or []) >= 2:
+        vid = info.get("id") or ""
+        for n, ch in enumerate(info["chapters"], start=1):
+            start, end = float(ch.get("start_time") or 0), float(ch.get("end_time") or 0)
+            chapters.append({"id": f"{vid}-ch{n:03d}", "url": entries[0]["url"] if entries else url,
+                             "title": ch.get("title") or f"Chapter {n}", "duration": max(0.0, end - start),
+                             "chapter": n, "uploader": uploader})
+        for ch, parsed in zip(chapters, guess_tracks(chapters, guess["name"], pattern)):
+            ch["original"] = ch["title"]
+            ch.update(parsed)
     year = ""
     date = info.get("upload_date") or info.get("modified_date") or ""
     if date[:4].isdigit():
@@ -176,7 +188,7 @@ def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str, pat
          thumb=_save_thumbnail(_thumbnail_url(info), thumbs, ffmpeg),
          name=guess["name"], category=guess["category"],
          album_artist=guess["album_artist"], disc=guess["disc"], year=year,
-         entries=entries)
+         entries=entries, chapters=chapters)
 
 
 def run_probe(args: argparse.Namespace) -> int:
@@ -250,7 +262,9 @@ class Runner:
             a += ["--limit-rate", p["rate"]]
         if item["mode"] == "audio":
             fmt = item.get("audio_format") or "best"
-            a += ["-f", "bestaudio/best", "-x", "--audio-format", fmt]
+            # Chapters stay in the file as markers: a full soundtrack kept as
+            # one file can still be stepped through track by track.
+            a += ["-f", "bestaudio/best", "-x", "--audio-format", fmt, "--embed-chapters"]
             if fmt in ("mp3", "m4a", "aac", "opus", "vorbis"):
                 a += ["--audio-quality", item.get("audio_quality") or "0"]
             if item.get("embed_thumb", True) and fmt != "wav":
@@ -353,7 +367,10 @@ class Runner:
                          "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
         else:
             args += ["-map", "0"]  # video, sound, subtitles, chapters, the thumbnail
-        args += ["-c", "copy", "-map_metadata", str(meta_index), "-map_chapters", "0"]
+        # Ogg and Opus keep their tags on the audio stream, not the file, and
+        # a stream's own tags would otherwise be copied over ours.
+        args += ["-c", "copy", "-map_metadata", str(meta_index),
+                 "-map_metadata:s:a", f"{meta_index}:g", "-map_chapters", "0"]
         if ext == ".mp3":
             args += ["-id3v2_version", "3"]  # what Windows Explorer and Premiere read
         args.append(str(dst))
@@ -391,6 +408,77 @@ class Runner:
         with gate:
             return self._download(item, track)
 
+    def _run_ytdlp(self, args: list[str], progress) -> tuple[str, str]:
+        """Runs one yt-dlp, reporting progress; returns (final file, error)."""
+        try:
+            proc = _popen(args)
+        except FileNotFoundError:
+            return "", "yt-dlp was not found"
+        with self.lock:
+            self.procs.add(proc)
+        err_lines: list[str] = []
+        t_err = threading.Thread(target=lambda: err_lines.extend(
+            proc.stderr.read().decode("utf-8", "replace").splitlines()), daemon=True)
+        t_err.start()
+        final = ""
+        last_emit = 0.0
+
+        def num(s: str) -> float:
+            try:
+                return float(s)
+            except ValueError:
+                return 0.0
+
+        # yt-dlp downloads video and audio separately for a merge; the bar
+        # shows each in turn, which is honest if a little jumpy.
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", "replace").strip()
+            if line.startswith("MTP "):
+                got, total, est, speed, eta = (num(x) for x in (line.split()[1:] + ["NA"] * 5)[:5])
+                total = total or est
+                now = time.monotonic()
+                if now - last_emit > 0.25:
+                    last_emit = now
+                    progress(round(100 * got / total, 1) if total else 0, speed, eta)
+            elif line.startswith("MTF "):
+                final = line[4:].strip()
+        proc.wait()
+        t_err.join(timeout=5)
+        proc.stdout.close()
+        proc.stderr.close()
+        with self.lock:
+            self.procs.discard(proc)
+        if self.stop.is_set():
+            return "", "stopped"
+        if proc.returncode != 0 or not final or not Path(final).exists():
+            return "", _last_error("\n".join(err_lines))
+        return final, ""
+
+    def _workdir(self, item: dict, track: dict) -> tuple[Path, Path]:
+        work = self.staging / safe_filename(item["key"])
+        work.mkdir(parents=True, exist_ok=True)
+        base = work / safe_filename(track.get("id") or hashlib.sha1(track["url"].encode()).hexdigest()[:12])
+        for old in work.glob(base.name + "*"):
+            if not old.name.endswith((".part", ".ytdl")):  # a half-done download resumes
+                old.unlink(missing_ok=True)
+        return work, base
+
+    def _finish(self, src: Path, item: dict, track: dict, folder: Path, cover: Path | None) -> tuple[str, str]:
+        """Tags one file, moves it into its folder, records it."""
+        key, tid = item["key"], track.get("id") or ""
+        try:
+            if item.get("metadata", True) or cover is not None:
+                emit("track", key=key, id=tid, state="tagging", pct=100)
+                src = self.tag(src, item, track, cover)
+            dest = self.place(src, item, track, folder)
+        except (OSError, RuntimeError) as exc:
+            return "error", str(exc)
+        with self.lock:
+            if tid:
+                self.manifest[f"{tid}:{item['mode']}"] = str(dest)
+        emit("track", key=key, id=tid, state="done", path=str(dest))
+        return "done", str(dest)
+
     def _download(self, item: dict, track: dict) -> tuple[str, str]:
         key, tid = item["key"], track.get("id") or ""
         folder = Path(item["folder"])
@@ -400,72 +488,79 @@ class Runner:
         if existing:
             emit("track", key=key, id=tid, state="skipped", path=existing)
             return "skipped", existing
-        work = self.staging / safe_filename(key)
-        work.mkdir(parents=True, exist_ok=True)
-        base = work / safe_filename(tid or hashlib.sha1(track["url"].encode()).hexdigest()[:12])
-        for old in work.glob(base.name + ".*"):
-            if not old.name.endswith((".part", ".ytdl")):  # a half-done download resumes
-                old.unlink(missing_ok=True)
+        work, base = self._workdir(item, track)
         emit("track", key=key, id=tid, state="downloading", pct=0)
-        args = self.ytdlp_args(item, track, base)
-        try:
-            proc = _popen(args)
-        except FileNotFoundError:
-            return "error", "yt-dlp was not found"
-        with self.lock:
-            self.procs.add(proc)
-        err_lines: list[str] = []
-        t_err = threading.Thread(target=lambda: err_lines.extend(
-            proc.stderr.read().decode("utf-8", "replace").splitlines()), daemon=True)
-        t_err.start()
-        final = ""
-        last_emit = 0.0
-        # yt-dlp downloads video and audio separately for a merge; the bar
-        # shows each in turn, which is honest if a little jumpy.
-        for raw in proc.stdout:
-            line = raw.decode("utf-8", "replace").strip()
-            if line.startswith("MTP "):
-                parts = line.split()[1:]
-                def num(s):
-                    try:
-                        return float(s)
-                    except ValueError:
-                        return 0.0
-                got, total, est, speed, eta = (num(x) for x in (parts + ["NA"] * 5)[:5])
-                total = total or est
-                now = time.monotonic()
-                if now - last_emit > 0.25:
-                    last_emit = now
-                    emit("track", key=key, id=tid, state="downloading",
-                         pct=round(100 * got / total, 1) if total else 0,
-                         speed=speed, eta=eta, bytes=got, total=total)
-            elif line.startswith("MTF "):
-                final = line[4:].strip()
-        proc.wait()
-        t_err.join(timeout=5)
-        with self.lock:
-            self.procs.discard(proc)
-        if self.stop.is_set():
+        final, error = self._run_ytdlp(
+            self.ytdlp_args(item, track, base),
+            lambda pct, speed, eta: emit("track", key=key, id=tid, state="downloading",
+                                         pct=pct, speed=speed, eta=eta))
+        if error == "stopped":
             return "stopped", ""
-        if proc.returncode != 0 or not final or not Path(final).exists():
-            return "error", _last_error("\n".join(err_lines))
+        if error:
+            return "error", error
         src = Path(final)
-        try:
-            cover = next((c for c in work.glob(base.name + ".*")
-                          if c.suffix.lower() in (".jpg", ".jpeg") and c != src), None)
-            if item.get("metadata", True) or cover is not None:
-                emit("track", key=key, id=tid, state="tagging", pct=100)
-                src = self.tag(src, item, track, cover)
-            dest = self.place(src, item, track, folder)
-        except (OSError, RuntimeError) as exc:
-            return "error", str(exc)
-        for leftover in work.glob(base.name + ".*"):  # thumbnails not embedded
+        cover = next((c for c in work.glob(base.name + ".*")
+                      if c.suffix.lower() in (".jpg", ".jpeg") and c != src), None)
+        result = self._finish(src, item, track, folder, cover)
+        for leftover in work.glob(base.name + "*"):  # thumbnails not embedded
             leftover.unlink(missing_ok=True)
-        with self.lock:
-            if tid:
-                self.manifest[f"{tid}:{item['mode']}"] = str(dest)
-        emit("track", key=key, id=tid, state="done", path=str(dest))
-        return "done", str(dest)
+        return result
+
+    def download_chapters(self, item: dict) -> list[tuple[dict, str, str]]:
+        """One long video, cut at its chapters into one file per track.
+
+        Each plan track is a chapter, with the chapter's number in "chapter"
+        (1-based, yt-dlp's section_number). The video is fetched once; the
+        chapters not chosen are thrown away.
+        """
+        key = item["key"]
+        folder = Path(item["folder"])
+        tracks = item.get("tracks") or []
+        if self.stop.is_set():
+            return [(t, "stopped", "") for t in tracks]
+        results: list[tuple[dict, str, str]] = []
+        todo = []
+        for t in tracks:
+            existing = self.already_there(item, t, folder)
+            if existing:
+                emit("track", key=key, id=t.get("id") or "", state="skipped", path=existing)
+                results.append((t, "skipped", existing))
+            else:
+                todo.append(t)
+        if not todo:
+            return results
+        video = {"id": item.get("video_id") or "", "url": item.get("video_url") or todo[0]["url"]}
+        work, base = self._workdir(item, video)
+        for t in todo:
+            emit("track", key=key, id=t.get("id") or "", state="downloading", pct=0)
+        args = self.ytdlp_args(item, video, base)
+        url = args.pop()
+        args += ["--split-chapters", "-o", "chapter:" + str(base) + " - %(section_number)03d.%(ext)s", url]
+
+        def progress(pct, speed, eta):
+            for t in todo:
+                emit("track", key=key, id=t.get("id") or "", state="downloading", pct=pct, speed=speed, eta=eta)
+
+        final, error = self._run_ytdlp(args, progress)
+        if error:
+            state = "stopped" if error == "stopped" else "error"
+            return results + [(t, state, error if state == "error" else "") for t in todo]
+        cover = next((c for c in work.glob(base.name + ".*")
+                      if c.suffix.lower() in (".jpg", ".jpeg")), None)
+        parts = {}
+        for f in work.glob(base.name + " - *"):
+            m = re.search(r" - (\d{3})\.[^.]+$", f.name)
+            if m and f.suffix.lower() not in (".jpg", ".jpeg", ".part", ".ytdl"):
+                parts[int(m.group(1))] = f
+        for t in todo:
+            src = parts.get(int(t.get("chapter") or 0))
+            if src is None or not src.exists():
+                results.append((t, "error", "yt-dlp did not produce this chapter"))
+                continue
+            results.append((t,) + self._finish(src, item, t, folder, cover))
+        for leftover in work.glob(base.name + "*"):  # the whole video and unchosen chapters
+            leftover.unlink(missing_ok=True)
+        return results
 
     # the whole plan -----------------------------------------------------------
 
@@ -482,6 +577,17 @@ class Runner:
                 state, detail = self.download(it, tr)
             except Exception as exc:  # one track must not end the rest
                 state, detail = "error", f"{type(exc).__name__}: {exc}"
+            record(it, tr, state, detail)
+
+        def chapters(it: dict) -> None:
+            try:
+                results = self.download_chapters(it)
+            except Exception as exc:
+                results = [(tr, "error", f"{type(exc).__name__}: {exc}") for tr in it.get("tracks") or []]
+            for tr, state, detail in results:
+                record(it, tr, state, detail)
+
+        def record(it: dict, tr: dict, state: str, detail: str) -> None:
             if state == "error":
                 emit("track", key=it["key"], id=tr.get("id") or "", state="error", message=detail)
             with self.lock:
@@ -505,6 +611,9 @@ class Runner:
             jobs = []
             for it in items:
                 emit("item", key=it["key"], state="running")
+                if it.get("split_chapters") and it.get("tracks"):
+                    jobs.append(pool.submit(chapters, it))
+                    continue
                 for tr in it.get("tracks") or []:
                     jobs.append(pool.submit(one, it, tr))
             for j in jobs:

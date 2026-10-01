@@ -2035,6 +2035,9 @@ step_track :: proc(delta: int) {
 @(private)
 handle_keys :: proc() {
 	typing := ui.focus != nil
+	// The Downloads screen handles its own keys. The library's would act on
+	// files that are not on screen: Delete would ask to delete them.
+	if dl.open { return }
 
 	if rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL) {
 		if rl.IsKeyPressed(.F) {

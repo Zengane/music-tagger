@@ -94,6 +94,27 @@ else
     echo
 fi
 
+# yt-dlp, for the Downloads screen. The app fetches it itself on first start
+# when it is missing; doing it here means it is ready offline too.
+if [ -x bin/yt-dlp ] || command -v yt-dlp >/dev/null 2>&1; then
+    echo "yt-dlp: found"
+else
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-*)       asset=yt-dlp_macos ;;
+        Linux-aarch64)  asset=yt-dlp_linux_aarch64 ;;
+        *)              asset=yt-dlp_linux ;;
+    esac
+    echo "yt-dlp: not found, downloading it into bin/"
+    mkdir -p bin
+    if curl -L --fail -sS -o bin/yt-dlp.download \
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/$asset"; then
+        mv bin/yt-dlp.download bin/yt-dlp && chmod +x bin/yt-dlp && echo "yt-dlp: installed"
+    else
+        rm -f bin/yt-dlp.download
+        echo "  Could not download yt-dlp. The app will try again when it starts."
+    fi
+fi
+
 if [ ! -d venv ]; then
     echo "Creating the environment. This takes a minute."
     if ! "$PY" -m venv venv; then

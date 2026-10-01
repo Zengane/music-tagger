@@ -53,6 +53,7 @@ FILES = [
     "organize_job.py",
     "import_folder_job.py",
     "sfx_split_job.py",
+    "download_job.py",
     "requirements.txt",
 ]
 # `premiere/` carries the Zen Drop panel and its installer. It is what

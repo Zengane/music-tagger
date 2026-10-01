@@ -1,12 +1,16 @@
 package musictagger
 
-// `--downloadcheck <folder> <link> [<link> ...] [--run N]`
+// `--downloadcheck <folder> <link> [<link> ...] [--run N] [--library]`
 //
 // The Downloads screen end to end, in a hidden window: yt-dlp's update check,
 // reading the links, and with --run the first N tracks of each actually
 // downloaded, tagged and filed into <folder>. Screenshots of each stage go to
 // work/downloads-*.png beside the program, so the layout can be looked at
 // without a window appearing on anyone's screen.
+//
+// --library opens <folder> as the library first, so the run also checks that
+// new files are scanned in and that game soundtracks get their game tag,
+// unsaved, waiting for Save.
 
 import "core:fmt"
 import "core:os"
@@ -22,8 +26,11 @@ run_download_check :: proc(args: []string) -> int {
 	folder := args[0]
 	links := make([dynamic]string, context.temp_allocator)
 	run_n := 0
+	as_library := false
 	for i := 1; i < len(args); i += 1 {
-		if args[i] == "--run" && i + 1 < len(args) {
+		if args[i] == "--library" {
+			as_library = true
+		} else if args[i] == "--run" && i + 1 < len(args) {
 			run_n, _ = strconv.parse_int(args[i + 1])
 			i += 1
 		} else {
@@ -60,11 +67,20 @@ run_download_check :: proc(args: []string) -> int {
 		for !done() {
 			if rl.GetTime() - start > seconds { return false }
 			poll_downloads()
+			if poll_scan() { search.dirty = true }
+			poll_folder_imports()
+			if search.dirty { rebuild_view() }
 			frame()
 		}
 		return true
 	}
 
+	if as_library {
+		_ = os.make_directory(folder)
+		open_library(add_library(folder))
+		_ = wait(proc() -> bool { return !scan.running }, 60)
+		fmt.printfln("library:           %s, %d files", lib.root, len(lib.tracks))
+	}
 	downloads_startup()
 	dl.open = true
 	field_set(&dl.fields[.Root], folder)
@@ -117,6 +133,17 @@ run_download_check :: proc(args: []string) -> int {
 			}
 		}
 		shot("done")
+		if as_library {
+			// The scan and the tag come a moment after the download.
+			_ = wait(proc() -> bool { return len(dl.pending_tags) == 0 && !scan.running && len(import_folder_queue) == 0 }, 120)
+			fmt.printfln("library now:       %d files", len(lib.tracks))
+			unsaved := 0
+			for &t in lib.tracks {
+				if t.dirty { unsaved += 1 }
+				fmt.printfln("  %-44s tags: %v%s", t.rel, t.tags[:], t.dirty ? "  (unsaved)" : "")
+			}
+			if unsaved == 0 { fmt.println("PROBLEM: no file got its game tag"); failures += 1 }
+		}
 	}
 	save_downloads()
 	return failures > 0 ? 1 : 0

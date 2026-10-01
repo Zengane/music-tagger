@@ -29,6 +29,11 @@ and why, without the build instructions.
   never overwriting anything.
 - **Sends a selection to Premiere** — the original media, with handles, placed
   at the playhead.
+- **Downloads playlists and videos** with yt-dlp, in a screen laid out like
+  Stacher: paste links, check the guessed game or album name and track
+  titles, pick audio or video and the format, and each playlist lands tagged
+  in its own folder. yt-dlp updates itself on every start and installs itself
+  when missing. See [docs/downloader.md](docs/downloader.md).
 - **Sound effects** get filename and folder based suggestions, silence-based
   splitting, and their own map.
 - **Images, video, 3D models and documents** are tagged too. What can be
@@ -144,6 +149,7 @@ venv\Scripts\python.exe tests.py          the Python side
 venv\Scripts\python.exe tests_media.py    measured tags on generated media
 venv\Scripts\python.exe tests_media_models.py  the model plumbing, offline
 venv\Scripts\python.exe tests_semantic.py search-by-description ranking
+venv\Scripts\python.exe tests_download.py the downloader's names, tags and filing, offline
 ```
 
 (On macOS and Linux: `./mtag-test` and `venv/bin/python`.)

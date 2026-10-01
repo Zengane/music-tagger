@@ -60,6 +60,7 @@ Dl_Track :: struct {
 	id, url, original, title, artist: string, // owned
 	duration: f32,
 	number:   int,
+	chapter:  int, // 1-based, when the track is a chapter of one long video
 	selected: bool,
 	state:    Dl_Track_State,
 	pct:      f32,
@@ -70,6 +71,11 @@ Dl_Track :: struct {
 
 Dl_Item :: struct {
 	key, url, title, uploader, thumb, year, message: string, // owned
+	// One long video with chapters: the tracks are its chapters, and `split`
+	// says whether they become separate files or the video stays whole.
+	video_id, video_url, video_title: string, // owned
+	chapters:      bool,
+	split:         bool,
 	name, album_artist: Text_Field,
 	playlist:      bool,
 	category:      Dl_Category,
@@ -470,8 +476,38 @@ on_probe :: proc(obj: json.Object) {
 				}
 			}
 		}
+		set_owned(&it.video_id, json_str(obj, "id"))
+		set_owned(&it.video_url, "")
+		set_owned(&it.video_title, "")
+		if len(it.tracks) > 0 {
+			set_owned(&it.video_url, it.tracks[0].url)
+			set_owned(&it.video_title, it.tracks[0].title)
+		}
+		it.chapters = false
+		if v, has := obj["chapters"]; has && !it.playlist {
+			if arr, ok := v.(json.Array); ok && len(arr) >= 2 {
+				dl_clear_tracks(&it)
+				for e in arr {
+					eo, is_obj := e.(json.Object)
+					if !is_obj { continue }
+					t: Dl_Track
+					t.id = strings.clone(json_str(eo, "id"))
+					t.url = strings.clone(json_str(eo, "url"))
+					t.original = strings.clone(json_str(eo, "original"))
+					t.title = strings.clone(json_str(eo, "title"))
+					t.artist = strings.clone(json_str(eo, "artist"))
+					t.duration = f32(json_num(eo, "duration"))
+					t.number = int(json_num(eo, "track"))
+					t.chapter = int(json_num(eo, "chapter"))
+					t.selected = true
+					append(&it.tracks, t)
+				}
+				it.chapters = true
+				it.split = true
+			}
+		}
 		// One video on its own is not track 1 of anything.
-		if !it.playlist { for &t in it.tracks { t.number = 0 } }
+		if !it.playlist && !it.chapters { for &t in it.tracks { t.number = 0 } }
 		it.state = .Ready
 		dl_save_soon()
 		return
@@ -493,6 +529,7 @@ dl_free_item :: proc(it: ^Dl_Item) {
 	delete(it.tracks)
 	delete(it.key); delete(it.url); delete(it.title); delete(it.uploader)
 	delete(it.thumb); delete(it.year); delete(it.message)
+	delete(it.video_id); delete(it.video_url); delete(it.video_title)
 	delete(it.name.buf); delete(it.album_artist.buf)
 	if it.texture.id != 0 { rl.UnloadTexture(it.texture) }
 }
@@ -578,7 +615,7 @@ dl_folder :: proc(it: ^Dl_Item, allocator := context.temp_allocator) -> string {
 
 Dl_Plan_Track :: struct {
 	id, url, title, artist: string,
-	track: int,
+	track, chapter: int,
 }
 
 Dl_Plan_Item :: struct {
@@ -586,6 +623,8 @@ Dl_Plan_Item :: struct {
 	folder, filename, album, album_artist, genre, year: string,
 	disc, total: int,
 	embed_thumb, square_cover, metadata, subtitles: bool,
+	split_chapters: bool,
+	video_id, video_url: string,
 	tracks: []Dl_Plan_Track,
 }
 
@@ -605,10 +644,17 @@ start_run :: proc() {
 		tracks := make([dynamic]Dl_Plan_Track, 0, len(it.tracks), context.temp_allocator)
 		for &t in it.tracks {
 			if !t.selected || t.state == .Done || t.state == .Skipped { continue }
-			append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number})
+			append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter})
 			t.state = .Waiting
 			t.pct = 0
 			set_owned(&t.message, "")
+		}
+		// Kept whole: one file, named after the card.
+		if it.chapters && !it.split {
+			clear(&tracks)
+			title := strings.trim_space(field_string(&it.name))
+			if it.video_title != "" && it.video_title != title { title = it.video_title }
+			append(&tracks, Dl_Plan_Track{it.video_id, it.video_url, title, "", 0, 0})
 		}
 		fmt_index := clamp(it.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
 		genre := it.category == .Game ? strings.trim_space(field_string(&dl.fields[.Genre])) : ""
@@ -626,7 +672,10 @@ start_run :: proc() {
 			album_artist  = strings.trim_space(field_string(&it.album_artist)),
 			genre         = genre,
 			year          = it.year,
-			total         = it.playlist ? len(it.tracks) : 0,
+			total         = it.playlist || (it.chapters && it.split) ? len(it.tracks) : 0,
+			split_chapters = it.chapters && it.split,
+			video_id      = it.video_id,
+			video_url     = it.video_url,
 			embed_thumb   = dl.cover,
 			square_cover  = dl.square_cover,
 			metadata      = dl.tags,
@@ -718,8 +767,9 @@ on_run :: proc(obj: json.Object) {
 		it := find_item(json_str(obj, "key"))
 		if it == nil { return }
 		id := json_str(obj, "id")
+		whole := it.chapters && !it.split && id == it.video_id
 		for &t in it.tracks {
-			if t.id != id || !t.selected { continue }
+			if (t.id != id && !whole) || !t.selected { continue }
 			switch json_str(obj, "state") {
 			case "downloading":
 				t.state = .Downloading
@@ -741,7 +791,7 @@ on_run :: proc(obj: json.Object) {
 				t.state = .Failed
 				set_owned(&t.message, json_str(obj, "message"))
 			}
-			break
+			if !whole { break }
 		}
 		it.done, it.skipped, it.failed = 0, 0, 0
 		for &t in it.tracks {
@@ -867,13 +917,14 @@ downloads_active :: proc() -> int {
 Dl_Saved_Track :: struct {
 	id, url, original, title, artist, path: string,
 	duration: f32,
-	number, state: int,
+	number, state, chapter: int,
 	selected: bool,
 }
 
 Dl_Saved_Item :: struct {
 	key, url, title, uploader, thumb, year, name, album_artist, message: string,
-	playlist, premiere, expanded: bool,
+	video_id, video_url, video_title: string,
+	playlist, premiere, expanded, chapters, split: bool,
 	category, mode, audio_format, video_quality, pattern, state: int,
 	done, skipped, failed: int,
 	tracks: []Dl_Saved_Track,
@@ -912,12 +963,13 @@ save_downloads :: proc() {
 	for &it, i in dl.items {
 		tracks := make([]Dl_Saved_Track, len(it.tracks), context.temp_allocator)
 		for &t, j in it.tracks {
-			tracks[j] = {t.id, t.url, t.original, t.title, t.artist, t.path, t.duration, t.number, int(t.state), t.selected}
+			tracks[j] = {t.id, t.url, t.original, t.title, t.artist, t.path, t.duration, t.number, int(t.state), t.chapter, t.selected}
 		}
 		items[i] = {
 			it.key, it.url, it.title, it.uploader, it.thumb, it.year,
 			field_string(&it.name), field_string(&it.album_artist), it.message,
-			it.playlist, it.premiere, it.expanded,
+			it.video_id, it.video_url, it.video_title,
+			it.playlist, it.premiere, it.expanded, it.chapters, it.split,
 			int(it.category), int(it.mode), it.audio_format, it.video_quality, it.pattern, int(it.state),
 			it.done, it.skipped, it.failed, tracks,
 		}
@@ -960,6 +1012,9 @@ load_downloads :: proc() {
 		field_set(&it.name, si.name)
 		field_set(&it.album_artist, si.album_artist)
 		it.playlist = si.playlist; it.premiere = si.premiere; it.expanded = si.expanded
+		it.chapters = si.chapters; it.split = si.split
+		it.video_id = strings.clone(si.video_id); it.video_url = strings.clone(si.video_url)
+		it.video_title = strings.clone(si.video_title)
 		it.category = Dl_Category(clamp(si.category, 0, len(Dl_Category) - 1))
 		it.mode = Dl_Mode(clamp(si.mode, 0, 1))
 		it.audio_format = clamp(si.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
@@ -971,7 +1026,7 @@ load_downloads :: proc() {
 			t: Dl_Track
 			t.id = strings.clone(st.id); t.url = strings.clone(st.url); t.original = strings.clone(st.original)
 			t.title = strings.clone(st.title); t.artist = strings.clone(st.artist); t.path = strings.clone(st.path)
-			t.duration = st.duration; t.number = st.number; t.selected = st.selected
+			t.duration = st.duration; t.number = st.number; t.selected = st.selected; t.chapter = st.chapter
 			t.state = Dl_Track_State(clamp(st.state, 0, len(Dl_Track_State) - 1))
 			if t.state == .Downloading || t.state == .Tagging { t.state = .Waiting }
 			append(&it.tracks, t)
@@ -1334,7 +1389,7 @@ draw_dl_card :: proc(it: ^Dl_Item, index: int, r: Rect) -> bool {
 		fill_round(thumb, PANEL_2, 4)
 		draw_icon(it.mode == .Audio ? .Music : .Video, inset(thumb, px(24)), TEXT_FAINT)
 	}
-	if it.playlist {
+	if it.playlist || it.chapters {
 		badge := fmt.ctprintf("%d", len(it.tracks))
 		bw := text_w(.Bold, badge, FS_SMALL) + px(12)
 		b := rect(thumb.x + thumb.width - bw - px(4), thumb.y + thumb.height - px(20), bw, px(16))
@@ -1447,6 +1502,13 @@ draw_dl_card :: proc(it: ^Dl_Item, index: int, r: Rect) -> bool {
 	case it.playlist:
 		facts = fmt.tprintf("%s  ·  %d of %d tracks  ·  %s%s", it.title, selected, len(it.tracks), fmt_duration(total),
 		                    it.uploader != "" ? fmt.tprintf("  ·  %s", it.uploader) : "")
+	case it.chapters && it.split:
+		facts = fmt.tprintf("%s  ·  %d of %d chapters, one file each  ·  %s%s", it.title, selected, len(it.tracks),
+		                    fmt_duration(total), it.uploader != "" ? fmt.tprintf("  ·  %s", it.uploader) : "")
+	case it.chapters:
+		whole: f32
+		for &t in it.tracks { whole += t.duration }
+		facts = fmt.tprintf("%s  ·  one file, %d chapters kept as markers  ·  %s", it.title, len(it.tracks), fmt_duration(whole))
 	case:
 		facts = fmt.tprintf("%s  ·  %s%s", it.title, fmt_duration(total), it.uploader != "" ? fmt.tprintf("  ·  %s", it.uploader) : "")
 	}
@@ -1550,6 +1612,18 @@ draw_dl_tracks :: proc(it: ^Dl_Item, index: int, r: Rect) {
 	outline_round(afield, ui.focus == rawptr(&it.album_artist) ? ACCENT : LINE, 4)
 	if editable {
 		if text_field(&it.album_artist, rect(afield.x + px(6), afield.y, afield.width - px(12), afield.height), "none") { dl_save_soon() }
+	}
+	if it.chapters {
+		split := it.split
+		sx := afield.x + afield.width + px(16)
+		label: cstring = "One file per chapter"
+		if editable {
+			if checkbox(sx, y + px(4), label, &split) { it.split = split; dl_save_soon() }
+		} else {
+			_ = checkbox(sx, y + px(4), label, &split)
+		}
+		tip(rect(sx, y, text_w(.Regular, label, FS_SMALL) + px(24), px(26)),
+		    "On: each chapter becomes its own tagged track. Off: one file for the whole video.")
 	}
 	y += px(34)
 
