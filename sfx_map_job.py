@@ -1,225 +1,233 @@
-"""Cached general-audio CLAP neighborhoods; no music probes or filename grouping."""
+r"""Sort the sound effects by how they sound: one job, started from the map.
+
+    venv\Scripts\python.exe sfx_map_job.py --paths-from <file> --out <json>
+
+What it does, in order, and what each step costs on a second run:
+
+  1. Embed every effect with the profile's sound model (PE-AV on Balanced and
+     Best, general CLAP on Fast). One model, loaded once, over every file that
+     is not cached yet. Cached per file (`mtag/dataset.py`), so a rerun only
+     embeds what is new.
+  2. Lay them out on a plane (PCA + t-SNE, the music map's own recipe).
+  3. Group them (agglomerative clustering on cosine distance) and name each
+     group from the audio, or from a filename word its files agree on.
+  4. Find each effect's 20 nearest neighbours, for hopping on the map and for
+     "Find more like this".
+
+Nothing here reads or writes tags. The previous map is kept next to the new
+one as `<out>.prev.json`, and the app's Undo swaps the two.
+
+If every path is cached and the map on disk already holds exactly these files
+from this model, the job stops after step 1: nothing to do.
+
+Output is NDJSON on stdout, as the other jobs:
+
+    {"event": "scan",  "total": 6568, "cached": 6500, "missing": 68}
+    {"event": "embed", "part": "pe-av-large", "done": 10, "total": 68}
+    {"event": "step",  "detail": "..."}
+    {"event": "done",  "placed": 6568}
+
+and the map is one JSON object:
+
+    {"version": 2, "encoder": "pe-av-large",
+     "points":  {"<path>": [x, y], ...},          x, y in -1..1
+     "regions": [{"label", "group", "pos", "count", "spread"}, ...],
+     "paths":   ["<path>", ...],                   the order of the two below
+     "group":   [g, ...],                          group of each path
+     "nn":      [[i, ...], ...]}                   20 nearest, closest first
+"""
 import argparse
+import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 os.environ.setdefault("OMP_NUM_THREADS", "4")
 import numpy as np
 from mtag.dataset import EmbeddingCache
+from mtag import sfxmap
+
+NEIGHBOURS = 20
+
 
 def emit(**event):
     print(json.dumps(event), flush=True)
 
+
 def _encoder():
-    """The profile's sound-and-text model (mtag/profiles.py): general CLAP
-    on the fast profile, as before, PE-AV above it."""
+    """The profile's sound-and-text model (mtag/profiles.py)."""
     from mtag.encoders import audio_text_encoder
 
     return audio_text_encoder()
 
 
-def load_vectors(paths):
+def _space():
     # Named without importing the encoders: a fully cached map never loads
     # torch at all.
     from mtag.profiles import audio_text_space
 
-    cache = EmbeddingCache(audio_text_space())
-    encoder = None
-    ready, vectors = [], []
+    return audio_text_space()
+
+
+class Model:
+    """The encoder, loaded on first use and only once."""
+
+    def __init__(self):
+        self.encoder = None
+
+    def get(self):
+        if self.encoder is None:
+            self.encoder = _encoder()
+            emit(event="step", detail=f"Loading the sound model {self.encoder.MODEL_ID} (first use downloads it)")
+            self.encoder.load()
+        return self.encoder
+
+    def close(self):
+        if self.encoder is not None:
+            self.encoder.unload()
+            self.encoder = None
+
+
+def load_vectors(paths, model=None):
+    """Every path's vector, from the cache or embedded now. Files that will
+    not decode are left off the map and reported."""
+    cache = EmbeddingCache(_space())
+    own = model is None
+    model = model or Model()
+    ready, vectors, missing = [], [], []
+    for path in paths:
+        try:
+            vector = cache.get(path)
+        except (OSError, ValueError):
+            vector = None
+        if vector is None:
+            missing.append(path)
+        elif np.isfinite(vector).all():
+            ready.append(path); vectors.append(vector)
+    emit(event="scan", total=len(paths), cached=len(ready), missing=len(missing))
     try:
-        for i, path in enumerate(paths):
+        for i, path in enumerate(missing):
             try:
-                try: vector = cache.get(path)
-                except (OSError, ValueError): vector = None
-                if vector is None:
-                    if encoder is None:
-                        encoder = _encoder()
-                        emit(event="step",detail=f"Loading the sound model {encoder.MODEL_ID} (first use downloads it)")
-                        encoder.load()
-                    vector = encoder.embed_file(path)
-                    cache.put(path,vector)
-                if not np.isfinite(vector).all(): raise ValueError("Invalid audio embedding")
+                encoder = model.get()
+                vector = encoder.embed_file(path)
+                if not np.isfinite(vector).all():
+                    raise ValueError("Invalid audio embedding")
+                cache.put(path, vector)
                 ready.append(path); vectors.append(vector)
             except Exception as exc:
-                emit(event="step",detail=f"Skipped {path.name}: {exc}")
-                if encoder is not None and not hasattr(encoder,"model"): raise
-            if i % 10 == 0 or i+1 == len(paths): emit(event="embed",done=i+1,total=len(paths))
+                emit(event="error", path=str(path), message=f"Skipped {path.name}: {exc}")
+                if model.encoder is not None and not hasattr(model.encoder, "model"):
+                    raise
+            if i % 10 == 0 or i + 1 == len(missing):
+                emit(event="embed", part=_space(), done=i + 1, total=len(missing))
     finally:
-        if encoder is not None: encoder.unload()
-    return ready,np.asarray(vectors,dtype=np.float32)
-
-# What the map is signposted with.
-#
-# The old labels came from the SFX tags a file carried, and most effects carry
-# none — so a map of eight thousand sounds had five words on it, several of them
-# wrong. CLAP is a text-audio model, so the audio can be asked what it is
-# instead: every effect is scored against each phrase below, and a phrase that
-# wins for enough files earns a signpost where those files sit.
-#
-# Plain descriptions, not tag names. This is the vocabulary of a sound library,
-# written to cover the space rather than to match anything already in it.
-CONCEPTS = [
- "an explosion", "a gunshot", "a heavy impact", "a punch", "breaking glass",
- "a door", "footsteps", "a whoosh", "a riser", "a downward sweep",
- "a metallic clang", "a wooden knock", "a bell", "a chime",
- "an electronic beep", "a user interface click", "a notification",
- "typing on a keyboard", "a coin", "a cash register",
- "a car engine", "a motorcycle", "a jet plane", "a helicopter", "a train",
- "tyres screeching", "a car horn",
- "rain", "thunder", "wind", "ocean waves", "a stream of water",
- "a water splash", "a water drop", "bubbles underwater",
- "fire crackling", "a flame burst",
- "birds singing", "a dog barking", "a cat", "a horse", "insects at night",
- "a baby crying", "a baby laughing", "a crowd cheering", "applause",
- "screaming", "laughter", "a cough", "breathing", "whispering",
- "singing", "a choir",
- "a drum beat", "a cymbal crash", "a bass drop", "an orchestral hit",
- "a synthesiser pad", "an ambient drone", "a low rumble", "deep sub bass",
- "machinery", "a motor whirring", "a clock ticking", "a camera shutter",
- "a zipper", "paper rustling", "cloth movement", "a switch",
- "a laser", "a science fiction weapon", "a magic spell", "a power up",
- "a sword", "a bow and arrow", "an alarm siren", "a telephone ringing",
- "a small room", "a large hall", "near silence",
- "a squeak", "a scrape", "a rattle", "a pop", "a click", "a thud", "a hiss",
-]
+        if own:
+            model.close()
+    return ready, np.asarray(vectors, dtype=np.float32)
 
 
-def signpost(phrase):
-    """The phrase as a label. CLAP wants a sentence; a map wants a word.
-
-    "a baby crying" scores better as a prompt than "baby crying" does, but the
-    article is dead width on a plate competing with sixty others for room.
-    """
-    for lead in ("a ", "an ", "the "):
-        if phrase.startswith(lead):
-            return phrase[len(lead):]
-    return phrase
-
-
-def concept_regions(paths, vectors, plane, min_files=12, limit=40):
-    """Where on the map each concept lives, for signposting.
-
-    A concept earns a signpost when it is the best match for at least
-    `min_files` effects. Its position is the *median* of those files, not the
-    mean: a family usually has a few members scattered across the map, and a
-    mean drags the label into empty space between them.
-    """
-    try:
-        encoder = _encoder()
-        encoder.load()
+def concept_text(model):
+    """The text vectors for the naming phrases, cached next to the audio
+    vectors so a rerun does not load the model just to read them again."""
+    cache = EmbeddingCache(_space())
+    digest = hashlib.sha1("\n".join(sfxmap.CONCEPTS).encode("utf-8")).hexdigest()[:12]
+    path = cache.dir / f"concepts-{digest}.npy"
+    if path.exists():
         try:
-            text = np.asarray(encoder.embed_text(CONCEPTS), dtype=np.float32)
-        finally:
-            encoder.unload()
-    except Exception as exc:
-        emit(event="step", detail=f"No signposts: {exc}")
-        return []
-
-    X = np.asarray(vectors, dtype=np.float32)
-    half = X.shape[1] // 2
-    audio = X[:, :half] if half > 0 else X
-    audio = audio / (np.linalg.norm(audio, axis=1, keepdims=True) + 1e-9)
-    text = text / (np.linalg.norm(text, axis=1, keepdims=True) + 1e-9)
-
-    best = (audio @ text.T).argmax(axis=1)
-    regions = []
-    for i, name in enumerate(CONCEPTS):
-        rows = plane[best == i]
-        if len(rows) < min_files:
-            continue
-        centre = np.median(rows, axis=0)
-        # How far that family spreads, so the app can show a loose group as a
-        # wash rather than a pin.
-        spread = float(np.median(np.linalg.norm(rows - centre, axis=1)))
-        regions.append({"label": signpost(name),
-                        "pos": [float(centre[0]), float(centre[1])],
-                        "count": int(len(rows)), "spread": spread})
-
-    # Biggest first, and only as many as a map can carry. The app drops any that
-    # would still overlap, but handing it two hundred to sort through every
-    # frame is work for nothing.
-    regions.sort(key=lambda r: -r["count"])
-    return regions[:limit]
+            return np.load(path)
+        except (OSError, ValueError):
+            pass
+    text = model.get().embed_text(sfxmap.CONCEPTS)
+    if text is None:
+        return None
+    text = np.asarray(text, dtype=np.float32)
+    np.save(path, text)
+    return text
 
 
-def reduce_to_plane_sfx(vectors):
-    """Flatten the effect embeddings to two dimensions for the map.
+def up_to_date(out: Path, ready) -> bool:
+    """The map on disk already holds exactly these files from this model."""
+    try:
+        doc = json.loads(out.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (doc.get("version") == 2 and doc.get("encoder") == _space()
+            and set(doc.get("paths", [])) == {str(p) for p in ready})
 
-    Measured, not guessed. A benchmark of 1057 files in 93 families taken from
-    the library's own filenames (BabyCry*, Whoosh*, Boom*, …) was scored on how
-    often a file's nearest neighbour comes from its own family:
 
-        the encoder's own space                32.7%   (chance 0.16%)
-        t-SNE at perplexity 30, as it was       9.4%
-        t-SNE at perplexity 10                 10.9%
-        UMAP on the text-aligned half          16.2%
+def build(ready, vectors, text):
+    """Everything the map needs, from vectors alone."""
+    from threadpoolctl import threadpool_limits
 
-    Scored the hard way: a file's nearest neighbour may be any of the 6568, not
-    just one of the labelled ones. A pilot over 1057 files read much higher —
-    71.9% and 50.3% — because six times fewer distractors is a six times easier
-    question. Do not quote the pilot; it flatters everything equally.
+    emit(event="step", detail=f"Arranging {len(ready)} effects by how they sound")
+    with threadpool_limits(limits=4):
+        plane = sfxmap.reduce_to_plane(vectors)
+    emit(event="step", detail="Grouping sounds that are alike")
+    groups = sfxmap.group(vectors)
+    emit(event="step", detail="Naming the groups")
+    names = sfxmap.name_groups(ready, groups, sfxmap.text_half(vectors), text)
+    regions = sfxmap.regions(plane, groups, names)
+    emit(event="step", detail="Finding each sound's nearest neighbours")
+    nn = sfxmap.nearest(vectors, NEIGHBOURS)
+    return {
+        "version": 2,
+        "encoder": _space(),
+        "points": {str(p): [round(float(x), 5), round(float(y), 5)] for p, (x, y) in zip(ready, plane)},
+        "regions": regions,
+        "paths": [str(p) for p in ready],
+        "group": groups.tolist(),
+        "nn": nn.tolist(),
+    }
 
-    So the projection was losing roughly two thirds of what the encoder knew,
-    and now loses half. The remaining gap is the encoder's, not the layout's.
-    Three details carry the gain:
 
-    `n_neighbors=5`, which beat 3, 8 and 15 at full size — small enough that a
-    family is not averaged together with whatever it sits next to, large enough
-    not to shatter at six thousand points. `min_dist=0.0`
-    because the map wants tight clusters, and any larger value cost 10 points
-    or more. And only the first half of each vector, which is the mean block —
-    the half that shares a space with CLAP's text tower. The second half is the
-    standard deviation across windows, which for a half-second effect is mostly
-    an artefact of padding.
-    """
-    import umap
+def write(out: Path, data: dict):
+    """Write the map, keeping the one it replaces as `<out>.prev.json`."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
+    if out.exists():
+        shutil.copy2(out, prev_path(out))
+    tmp.replace(out)
 
-    X = np.asarray(vectors, dtype=np.float32)
-    half = X.shape[1] // 2
-    A = X[:, :half] if half > 0 else X
-    A = A / (np.linalg.norm(A, axis=1, keepdims=True) + 1e-9)
 
-    # UMAP needs more neighbours than it has points on a tiny library.
-    n_neighbors = max(2, min(5, len(A) - 1))
-    plane = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.0,
-                      metric="cosine", random_state=0).fit_transform(A)
-    plane = np.asarray(plane, dtype=np.float32)
-
-    # Centred and scaled to roughly -1..1, which is what the map expects and
-    # what the music layout already produces.
-    plane -= plane.mean(axis=0)
-    scale = np.abs(plane).max()
-    if scale > 0:
-        plane /= scale
-    return plane
+def prev_path(out: Path) -> Path:
+    return out.with_name(out.stem + ".prev.json")
 
 
 def main():
     # UTF-8 output, and background priority when the app started this job.
     from mtag import console
     console.init()
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--paths-from",required=True)
-    ap.add_argument("--out",required=True)
-    args=ap.parse_args()
-    paths=list(dict.fromkeys(Path(p) for p in Path(args.paths_from).read_text(encoding="utf-8").splitlines() if p.strip()))
-    ready,vectors=load_vectors(paths)
-    if len(ready)<4: raise ValueError("At least four decodable SFX are needed; existing map kept")
-    emit(event="step",detail=f"Arranging {len(ready)} effects by audio similarity")
-    from threadpoolctl import threadpool_limits
-    with threadpool_limits(limits=4): plane=reduce_to_plane_sfx(vectors)
-    out=Path(args.out); out.parent.mkdir(parents=True,exist_ok=True)
-    emit(event="step",detail="Naming the regions")
-    regions=concept_regions(ready,vectors,plane)
-    emit(event="step",detail=f"{len(regions)} regions named")
-    from mtag.profiles import audio_text_space
-    data={"version":1,"encoder":audio_text_space(),
-          "points":{str(p):xy.tolist() for p,xy in zip(ready,plane)},
-          "regions":regions}
-    tmp=out.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data),encoding="utf-8"); tmp.replace(out)
-    emit(event="done",placed=len(ready))
-if __name__=="__main__":
-    try: main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--paths-from", required=True)
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+    paths = list(dict.fromkeys(Path(p) for p in Path(args.paths_from).read_text(encoding="utf-8").splitlines() if p.strip()))
+    out = Path(args.out)
+    model = Model()
+    try:
+        ready, vectors = load_vectors(paths, model)
+        if len(ready) < 4:
+            raise ValueError("At least four decodable effects are needed; the existing map is kept")
+        if up_to_date(out, ready):
+            emit(event="step", detail="The effects map is already up to date")
+            emit(event="done", placed=len(ready))
+            return
+        try:
+            text = concept_text(model)
+        except Exception as exc:
+            emit(event="step", detail=f"No names from the sound model: {exc}")
+            text = None
+    finally:
+        model.close()
+    data = build(ready, vectors, text)
+    write(out, data)
+    emit(event="done", placed=len(ready))
+
+
+if __name__ == "__main__":
+    try:
+        main()
     except Exception as exc:
-        emit(event="error",message=str(exc)); raise SystemExit(1)
+        emit(event="error", message=str(exc))
+        raise SystemExit(1)

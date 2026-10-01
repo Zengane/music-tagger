@@ -126,6 +126,26 @@ sort_view :: proc() {
 		})
 	case .Similar:
 		if search.anchor < 0 || search.anchor >= len(lib.tracks) { return }
+		// An effect on the sorted effects map has its nearest sounds from the
+		// embedding, which hear far better than eight measurements: those go
+		// first, closest first, and the measurements order the rest.
+		clear(&similar_rank)
+		if lib.tracks[search.anchor].is_sfx {
+			similar_rank[search.anchor] = -1
+			for n, i in sfx_neighbours(search.anchor) { similar_rank[n] = i }
+		}
+		if len(similar_rank) > 1 {
+			slice.sort_by(search.view[:], proc(a, b: int) -> bool {
+				ra, in_a := similar_rank[a]
+				rb, in_b := similar_rank[b]
+				if in_a != in_b { return in_a }
+				if in_a { return ra < rb }
+				ref := lib.tracks[search.anchor].features
+				return feature_distance(lib.tracks[a].features, ref) <
+				       feature_distance(lib.tracks[b].features, ref)
+			})
+			break
+		}
 		anchor := lib.tracks[search.anchor].features
 		if !anchor.valid { return }
 		slice.sort_by(search.view[:], proc(a, b: int) -> bool {
@@ -505,3 +525,8 @@ tag_suggestions :: proc(needle: string, out: ^[dynamic]string, limit := 12) {
 		append(out, tag)
 	}
 }
+
+// Where each of the anchor's nearest sounds stands, for the .Similar sort,
+// whose predicate cannot capture it.
+@(private)
+similar_rank: map[int]int

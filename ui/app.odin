@@ -2180,7 +2180,12 @@ handle_keys :: proc() {
 	if rl.IsKeyPressed(.T) { set_view(app.view == .Tag ? .Browse : .Tag) }
 	if rl.IsKeyPressed(.G)   { apply_filename_guess() }
 	if rl.IsKeyPressed(.F)   && app.view == .Map { nodes.built = false }
-	if !tiles {
+	// On the effects map the arrows hop between sounds that are alike; five
+	// seconds of seeking means nothing in a half-second effect.
+	if sfx_hopping() {
+		if key_repeat(.RIGHT) { sfx_hop_step(1) }
+		if key_repeat(.LEFT)  { sfx_hop_step(-1) }
+	} else if !tiles {
 		if rl.IsKeyPressed(.LEFT)  { seek_to(player_position() - 5) }
 		if rl.IsKeyPressed(.RIGHT) { seek_to(player_position() + 5) }
 	}

@@ -240,8 +240,7 @@ finish_map_job :: proc() {
 		toast(map_job.detail == "" ? "the map job failed" : map_job.detail)
 		return
 	}
-    for key in sfx_sound_map.points { delete(key) }
-    clear(&sfx_sound_map.points); sfx_sound_map.loaded=false
+	reset_sfx_sound_map()
 	invalidate_music_map()
 	load_music_map()
 	invalidate_nodes()

@@ -604,6 +604,10 @@ draw_nodes :: proc(r: Rect) {
 		ui.hover_cursor = .POINTING_HAND
 
 		label := elide_right(display_text(t.name), px(320), FS_SMALL)
+		// On the effects map, which group it is in: the name of the colour.
+		if group := nodes.source == .Semantic ? sfx_group_of(d.track) : ""; group != "" {
+			label = elide_right(display_text(fmt.tprintf("%s  Â·  %s", t.name, group)), px(380), FS_SMALL)
+		}
 		w := text_w(.Auto, label, FS_SMALL) + px(16)
 		box := rect(min(p.x + px(12), r.x + r.width - w - px(6)), p.y - px(28), w, px(22))
 		fill_round(box, PANEL_3)
@@ -611,6 +615,7 @@ draw_nodes :: proc(r: Rect) {
 		draw_text_mid(.Auto, label, box.x + px(8), box.y, box.height, FS_SMALL, TEXT)
 
 		if clicked_in(r) {
+			sfx_hop_from(app.selected, d.track)
 			app.selected  = d.track
 			app.inspector = true
 			play_track(d.track)
@@ -625,6 +630,7 @@ draw_nodes :: proc(r: Rect) {
 		}
 	}
 
+	draw_sfx_neighbours(r, centre)
 	draw_node_legend(r)
 	draw_map_mode_switch(r)
 }
@@ -658,16 +664,13 @@ draw_map_mode_switch :: proc(r: Rect) {
 	caption: cstring = "placed by what was measured"
 	if nodes.source == .Model { caption = "placed by how the model hears them" }
     if search.kind == .Effects {
-        caption = nodes.source == .Semantic ? "SFX audio similarity (CLAP)" : "Basic audio measurements - build the SFX sound map for audio similarity"
+        caption = nodes.source == .Semantic ? fmt.ctprintf("grouped by how they sound (%s) Â· click a sound, then Right / Left to hop to the nearest", sfx_extra.encoder == "" ? "sound model" : sfx_extra.encoder) : "placed by what was measured - sort them by sound for groups and neighbours"
     }
 	draw_text(.Regular, caption, x, y + px(3), FS_SMALL, TEXT_FAINT)
 	y += px(20)
 
     if search.kind == .Effects {
-        if map_job.running {
-            draw_text(.Regular, strings.clone_to_cstring(map_job.detail,context.temp_allocator),x,y,FS_SMALL,ACCENT)
-            if button(rect(x,y+px(22),px(100),px(24)),"Stop mapping",.Ghost) { stream_kill(&map_job.stream); stream_close(&map_job.stream); map_job.running=false; toast("Mapping stopped; completed audio analysis is cached") }
-        } else if button(rect(x,y,px(180),px(24)),"Build / update SFX sound map",.Ghost) { start_sfx_map() }
+        draw_sfx_map_controls(x, y)
         return
     }
 	// Music needs the model's layout, and the model's layout has to be built
