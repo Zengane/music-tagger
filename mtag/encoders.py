@@ -357,7 +357,14 @@ class PeAvEncoder(Encoder):
     def load(self):
         from transformers import AutoModel, PeAudioModel
 
-        dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
+        # bfloat16, not float16: in float16 PE-AV overflows and returns NaN
+        # for most effects (measured 2026-10-01: every one of 6 files tried,
+        # and none in bfloat16 or float32). bfloat16 has float32's range and
+        # runs as fast as float16; float32 is seven times slower.
+        if _DEVICE == "cuda" and torch.cuda.is_bf16_supported():
+            dtype = torch.bfloat16
+        else:
+            dtype = torch.float32
         from transformers import AutoConfig
 
         # The published checkpoints are the audio-video model; an audio-only
