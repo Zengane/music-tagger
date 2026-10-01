@@ -205,36 +205,42 @@ place_sfx_regions :: proc(scale: f32) -> bool {
 
 // Which library track each of the job's rows is. Over the whole library, not
 // only what is drawn: an effect the kind filter hides is still a neighbour.
-resolve_sfx_rows :: proc() {
-    clear(&sfx_extra.track_of_row)
-    resize(&sfx_extra.track_of_row,len(sfx_extra.row_key))
-    for &v in sfx_extra.track_of_row { v=-1 }
+resolve_sfx_rows :: proc() { resolve_rows(&sfx_extra,true) }
+
+resolve_rows :: proc(e: ^Sfx_Map_Extra, sfx: bool) {
+    clear(&e.track_of_row)
+    resize(&e.track_of_row,len(e.row_key))
+    for &v in e.track_of_row { v=-1 }
     for &t,i in lib.tracks {
-        if !t.is_sfx { continue }
-        if row,has:=sfx_extra.row_of[path_key(t.path)]; has { sfx_extra.track_of_row[row]=i }
+        if t.is_sfx!=sfx { continue }
+        if row,has:=e.row_of[path_key(t.path)]; has { e.track_of_row[row]=i }
     }
 }
 
 // The nearest sounds to a track, closest first, as track indices. Empty when
-// the map has no neighbours for it.
+// the map has no neighbours for it. Effects read the effects map, songs the
+// music map.
 sfx_neighbours :: proc(track: int, allocator := context.temp_allocator) -> []int {
-    load_sfx_sound_map()
-    out:=make([dynamic]int,0,sfx_extra.k,allocator)
-    if track<0 || track>=len(lib.tracks) || sfx_extra.k==0 { return out[:] }
-    row,ok:=sfx_extra.row_of[path_key(lib.tracks[track].path)]
+    if track<0 || track>=len(lib.tracks) { return nil }
+    sfx:=lib.tracks[track].is_sfx
+    e:=&sfx_extra
+    if sfx { load_sfx_sound_map() } else { load_music_map(); e=&music_extra }
+    out:=make([dynamic]int,0,e.k,allocator)
+    if e.k==0 { return out[:] }
+    row,ok:=e.row_of[path_key(lib.tracks[track].path)]
     if !ok { return out[:] }
     // Resolved again when the library has moved under the rows (a rescan).
-    stale :: proc(n: int) -> bool {
-        if n>=len(sfx_extra.track_of_row) { return true }
-        t:=sfx_extra.track_of_row[n]
-        return t>=len(lib.tracks) || (t>=0 && path_key(lib.tracks[t].path)!=sfx_extra.row_key[n])
+    stale :: proc(e: ^Sfx_Map_Extra, n: int) -> bool {
+        if n>=len(e.track_of_row) { return true }
+        t:=e.track_of_row[n]
+        return t>=len(lib.tracks) || (t>=0 && path_key(lib.tracks[t].path)!=e.row_key[n])
     }
-    if len(sfx_extra.track_of_row)!=len(sfx_extra.row_key) || stale(row) { resolve_sfx_rows() }
-    for j in 0..<sfx_extra.k {
-        n:=int(sfx_extra.nn[row*sfx_extra.k+j])
-        if n<0 || n>=len(sfx_extra.row_key) { continue }
-        if stale(n) { resolve_sfx_rows() }
-        if t:=sfx_extra.track_of_row[n]; t>=0 { append(&out,t) }
+    if len(e.track_of_row)!=len(e.row_key) || stale(e,row) { resolve_rows(e,sfx) }
+    for j in 0..<e.k {
+        n:=int(e.nn[row*e.k+j])
+        if n<0 || n>=len(e.row_key) { continue }
+        if stale(e,n) { resolve_rows(e,sfx) }
+        if t:=e.track_of_row[n]; t>=0 { append(&out,t) }
     }
     return out[:]
 }
@@ -249,7 +255,16 @@ sfx_group_of :: proc(track: int) -> string {
 
 // Whether the arrow keys hop between sounds right now.
 sfx_hopping :: proc() -> bool {
-    return app.view==.Map && nodes.mode==.Sound && nodes.source==.Semantic && sfx_extra.k>0
+    if app.view!=.Map || nodes.mode!=.Sound { return false }
+    return (nodes.source==.Semantic && sfx_extra.k>0) || (nodes.source==.Model && music_extra.k>0)
+}
+
+// Where a track's dot is on the map. The effects map keeps a table; the music
+// map is small enough to look.
+dot_of :: proc(track: int) -> (int, bool) {
+    if i,ok:=sfx_extra.dot_of_track[track]; ok && nodes.source==.Semantic { return i,true }
+    for d,i in nodes.dots { if d.track==track { return i,true } }
+    return -1,false
 }
 
 // Remembers where a hop came from, so Left can go back to it. Called before
@@ -288,8 +303,8 @@ sfx_hop_step :: proc(delta: int) {
 // Lines from the selected sound to its nearest ones, brightest for the
 // closest, and the first five numbered in the order Right will visit them.
 draw_sfx_neighbours :: proc(r: Rect, centre: rl.Vector2) {
-    if nodes.source!=.Semantic || app.selected<0 { return }
-    di,ok:=sfx_extra.dot_of_track[app.selected]
+    if !sfx_hopping() || app.selected<0 { return }
+    di,ok:=dot_of(app.selected)
     if !ok || di>=len(nodes.dots) || nodes.dots[di].track!=app.selected { return }
     screen :: proc(p, centre: rl.Vector2) -> rl.Vector2 {
         return {centre.x+(p.x+nodes.pan.x)*nodes.zoom, centre.y+(p.y+nodes.pan.y)*nodes.zoom}
@@ -311,7 +326,7 @@ draw_sfx_neighbours :: proc(r: Rect, centre: rl.Vector2) {
     shown,order:=0,0
     for n in sfx_neighbours(app.selected) {
         if shown>=SFX_HOP_SHOW { break }
-        ni,has:=sfx_extra.dot_of_track[n]
+        ni,has:=dot_of(n)
         if !has { continue }
         shown+=1
         to:=screen(nodes.dots[ni].pos,centre)

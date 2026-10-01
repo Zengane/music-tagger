@@ -130,10 +130,9 @@ sort_view :: proc() {
 		// embedding, which hear far better than eight measurements: those go
 		// first, closest first, and the measurements order the rest.
 		clear(&similar_rank)
-		if lib.tracks[search.anchor].is_sfx {
-			similar_rank[search.anchor] = -1
-			for n, i in sfx_neighbours(search.anchor) { similar_rank[n] = i }
-		}
+		// Songs the same way, from the music map.
+		similar_rank[search.anchor] = -1
+		for n, i in sfx_neighbours(search.anchor) { similar_rank[n] = i }
 		if len(similar_rank) > 1 {
 			slice.sort_by(search.view[:], proc(a, b: int) -> bool {
 				ra, in_a := similar_rank[a]

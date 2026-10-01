@@ -665,7 +665,9 @@ draw_map_mode_switch :: proc(r: Rect) {
 
 	// What the positions mean, in the plainest words available.
 	caption: cstring = "placed by what was measured"
-	if nodes.source == .Model { caption = "placed by how the model hears them" }
+	if nodes.source == .Model {
+		caption = music_extra.k > 0 ? "placed by how the model hears them · click one, then Right / Left to hop to the nearest" : "placed by how the model hears them"
+	}
     if search.kind == .Effects {
         caption = nodes.source == .Semantic ? "grouped by how they sound · click one, then Right / Left to hop to the nearest" : "placed by what was measured - sort them by sound for groups and neighbours"
     }

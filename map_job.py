@@ -67,9 +67,11 @@ import numpy as np  # noqa: E402
 
 from mtag.dataset import EmbeddingCache  # noqa: E402
 from mtag.encoders import FusionEncoder  # noqa: E402
+from mtag.sfxmap import nearest  # noqa: E402
 from mtag.taxonomy import AUDIO_EXTS  # noqa: E402
 
 DEFAULT_OUT = ROOT / "model" / "soundmap.json"
+NEIGHBOURS = 20
 
 
 def emit(**payload) -> None:
@@ -254,10 +256,17 @@ def main() -> int:
     points = {str(p): [round(float(xy[0]), 5), round(float(xy[1]), 5)]
               for p, xy in zip(ready, plane)}
 
+    # Each song's nearest others for hopping on the map and for "Find more
+    # like this". Read from the full embedding, not the probe scores: the
+    # question is "what sounds like this", not "what has the same mood".
+    emit(event="step", detail="Finding each song's nearest neighbours")
+    nn = nearest(np.asarray(X, dtype=np.float32), NEIGHBOURS)
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "points": points}, f)
+        json.dump({"version": 2, "points": points,
+                   "paths": [str(p) for p in ready], "nn": nn.tolist()}, f)
 
     emit(event="done", placed=len(points), out=str(out))
     return 0

@@ -44,6 +44,10 @@ Music_Map :: struct {
 
 music_map: Music_Map
 
+// Each song's nearest others, from the same job: for hopping on the map and
+// for "Find more like this". Same layout as the effects map's.
+music_extra: Sfx_Map_Extra
+
 music_map_path :: proc() -> string {
 	return join_path({project_root(), "model", "soundmap.json"}, context.temp_allocator)
 }
@@ -82,6 +86,25 @@ load_music_map :: proc() {
 		music_map.points[key] = {f32(x), f32(y)}
 	}
 	music_map.found = len(music_map.points) > 0
+
+	// Neighbours, when the map is new enough to have them.
+	paths, has_paths := root["paths"].(json.Array)
+	nn, has_nn := root["nn"].(json.Array)
+	if !has_paths || !has_nn || len(paths) != len(nn) || len(nn) == 0 { return }
+	first, _ := nn[0].(json.Array)
+	music_extra.k = len(first)
+	for value, row in paths {
+		path, _ := value.(json.String)
+		key := strings.clone(path_key(string(path)))
+		music_extra.row_of[key] = row
+		append(&music_extra.row_key, key)
+		list, _ := nn[row].(json.Array)
+		for j in 0 ..< music_extra.k {
+			n := -1
+			if j < len(list) { if v, num := as_number(list[j]); num { n = int(v) } }
+			append(&music_extra.nn, i32(n))
+		}
+	}
 }
 
 @(private)
@@ -97,6 +120,12 @@ invalidate_music_map :: proc() {
 	for key in music_map.points { delete(key) }
 	clear(&music_map.points)
 	music_map.loaded = false
+	for key in music_extra.row_of { delete(key) }
+	clear(&music_extra.row_of)
+	clear(&music_extra.row_key)
+	clear(&music_extra.nn)
+	clear(&music_extra.track_of_row)
+	music_extra.k = 0
 }
 
 // Where this track sits, if the model has an opinion about it.
