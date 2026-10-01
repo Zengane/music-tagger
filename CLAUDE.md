@@ -161,3 +161,19 @@ Open issues: `docs/audit-2026-10.md`. Model notes: `docs/audio-models.md`,
   same groups, neighbours and map.
 - Full run with cached vectors 26 s; rerun 3 s.
 - Not done: accepting a group as tags; probes on folder names; banks.
+
+---
+
+## Downloads (yt-dlp), done 2026-10-01
+
+- Screen: `ui/downloads.odin` (button in the top bar). Job:
+  `download_job.py` (probe / run), names: `mtag/downloads.py`. Standard
+  library only. Full notes: `docs/downloader.md`.
+- yt-dlp: `-U` on every start; installed into `bin\` with curl when missing.
+- Checks: `tests_download.py` (offline), and
+  `mt-check.exe --downloadcheck <empty folder> <link> [--run 3] [--library]`
+  (hidden window, real links, screenshots in `work\`).
+- Downloads go only to the folder the owner picks. Game tags are added
+  unsaved; Save writes them.
+- Not done: other sites than YouTube untried; a full-OST video downloads whole
+  even when only some chapters are wanted.
