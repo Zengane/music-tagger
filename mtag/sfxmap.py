@@ -174,6 +174,9 @@ _STOP = {
     "bank", "file", "clip", "track", "part", "short", "long", "small", "big",
     "large", "med", "medium", "high", "low", "soft", "hard", "single",
     "multi", "various", "misc", "other", "generic", "amb", "npc",
+    # Pack and production words.
+    "bpm", "khz", "bit", "sample", "samples", "pack", "vol", "volume",
+    "library", "collection", "free", "demo", "preview", "master", "stem",
 }
 _SPLIT = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
 
