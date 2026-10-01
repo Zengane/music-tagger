@@ -39,15 +39,16 @@ Not re-checked online today. Licences and candidates come from
 
 ## What I would do, in order
 
-1. **Turn on PE-AV for effects and measure it.** Open the effects map once
-   (downloads PE-AV, embeds 6,568 effects on the GPU), then run
-   `venv\Scripts\python.exe sfx_map_bench.py pe-av-large` and compare with
-   16.2%. Low effort, likely a clear gain for search and the map.
+1. **Turn on PE-AV for effects and measure it.** Done 2026-10-01: PE-AV
+   small and large were *worse* than general CLAP for nearest sounds (67%
+   against 72%), so the map stays on CLAP. The map's 16.2% was a bench error;
+   it scored 25.2%, and the new map 30.8% (`docs/sfx-map.md`).
 2. **Train effect probes on your folder names**, like the music tagger.
    6,568 effects in named folders is a training set. Probes on PE-AV vectors
    give tags in your words, with measured accuracy. This is the step most
    likely to make effects feel like the music side.
-3. **"More like this"** on any effect: nearest neighbours in PE-AV space.
+3. **"More like this"** on any effect: done 2026-10-01, nearest neighbours in
+   general CLAP space, and the arrow keys hop along them on the map.
    Cheap once step 1 has run.
 4. **Replace AST** with CED-mini (better and ten times smaller) only if its
    licence is cleared (model card says Apache-2.0, the code it runs is

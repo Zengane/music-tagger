@@ -143,3 +143,21 @@ Open issues: `docs/audit-2026-10.md`. Model notes: `docs/audio-models.md`,
 - No new model unless its licence allows commercial use; add it to
   `docs/model-licences.md`.
 - Update `docs/` and this file when done.
+
+### Status 2026-10-01 (done; details in `docs/sfx-map.md`)
+
+- The owner asked for **no new buttons**: everything is in Map → Sound with
+  Effects, the same way music works. One in-tab button ("Sort N effects by
+  sound" / "Map N new effects") and **Undo** (swaps with
+  `model/sfx-soundmap.prev.json`). No preview-panel strip; hopping is on the
+  map: click a sound, Right / Left.
+- **Encoder: general CLAP, not PE-AV**, by measurement (CLAP 71.9%, PE-AV
+  small 67.5%, large 67.0% on the labelled set). PE-AV now loads in bfloat16:
+  in float16 it returned NaN for most effects.
+- **The old bench was wrong about the map**: it scored the plane by cosine.
+  By distance the old UMAP map was 25.2%, not 16.2%. New t-SNE map 30.8%;
+  hopping neighbours 32.7% (= the encoder).
+- Groups: Ward, ~40 per group, 164 on the library. Renamed copies give the
+  same groups, neighbours and map.
+- Full run with cached vectors 26 s; rerun 3 s.
+- Not done: accepting a group as tags; probes on folder names; banks.

@@ -155,19 +155,19 @@ was trained on it applies 2.9 tags per track where a person applied 3.1 — of
 those, about 1.8 are right and 1.2 want removing. Three tags never apply
 themselves because their probes never reached that precision.
 
-The effects map is weaker, and the number is worth stating plainly. Asking
-whether a sound's nearest neighbour on the map comes from the same family, over
-6568 effects in 93 filename-derived families:
+The effects map, measured. Asking whether a sound's nearest neighbour comes
+from the same family, over 6568 effects in 93 filename-derived families:
 
 | | |
 |---|---|
 | chance | 0.16% |
-| what the encoder knows | 32.7% |
-| the map, as 2D t-SNE | 9.4% |
-| the map now, as 2D UMAP | 16.2% |
+| hopping and "Find more like this" (the encoder itself) | 32.7% |
+| the map now (t-SNE, like the music map) | 30.8% |
+| the map before (UMAP) | 25.2% |
 
-So the layout improved by about 70%, and the remaining gap is the encoder's,
-not the projection's. `sfx_map_bench.py` reproduces all of that.
+Earlier versions of this table said 16.2% for the UMAP map; the bench scored
+the flat map by angle instead of distance. `sfx_map_bench.py` reproduces the
+numbers, and `docs/sfx-map.md` explains the map.
 
 ## Training your own model
 

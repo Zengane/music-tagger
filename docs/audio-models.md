@@ -15,7 +15,7 @@ music one has to be measured on your library before it can be trusted.**
 |---|---|---|
 | Search by describing a sound | general CLAP (2022) | **PE-AV** (Meta, Dec 2025) on Balanced and Best |
 | Effect categories | AudioSet classifier (AST) + filename | the same, **plus** PE-AV asked about each category in plain words ("a rising sound effect that builds up tension") |
-| Effects map | general CLAP | PE-AV on Balanced and Best |
+| Effects map | general CLAP | general CLAP on every profile: PE-AV measured worse for "sounds like this" (`docs/sfx-map.md`) |
 | Music tagger | MuQ-MuLan + MuQ + CLAP-music | unchanged — **but** a PE-AV fusion can now be trained and compared (§4) |
 | Speed or accuracy | one fixed set | Fast / Balanced / Best / Auto (§3) |
 
@@ -89,13 +89,12 @@ fusion.
 
 ## 5. Effects, measured
 
-The effects map has a benchmark from your own filenames (`sfx_map_bench.py`,
-16.2% neighbour agreement with general CLAP). To compare PE-AV:
+The effects map has a benchmark from your own filenames (`sfx_map_bench.py`).
+Measured 2026-10-01: general CLAP finds a same-family nearest sound 71.9% of
+the time among the 1,057 labelled effects, PE-AV small 67.5%, PE-AV large
+67.0%. So the map stays on general CLAP; see `docs/sfx-map.md`.
 
-1. Set **Settings → Analysis models → Balanced** and open the effects map once
-   (this embeds every effect with PE-AV small; a GPU makes it quick).
-2. Run `venv\Scripts\python.exe sfx_map_bench.py pe-av-small`, and compare it
-   with `venv\Scripts\python.exe sfx_map_bench.py` (general CLAP).
+PE-AV now loads in bfloat16. In float16 it returned NaN for most effects.
 
 The zero-shot effect categories are scaled down (`ZS_WEIGHT` in `sfx_job.py`)
 so they only apply themselves when PE-AV is very sure; the rest show as

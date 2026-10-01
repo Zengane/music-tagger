@@ -309,8 +309,9 @@ work if it turned out badly*, not by what is most urgent.
 
    This is first because **the whole product rests on one claim**: that a map
    of files placed by content is genuinely useful. It is proven for audio. It
-   is only assumed for images, and the effects map measured 16.2% where the
-   encoder knew 32.7%, so the projection step is not free. If images map badly,
+   is only assumed for images, and the effects map measured 25.2% (UMAP) and
+   now 30.8% (t-SNE) where the encoder knew 32.7%, so the projection step is
+   not free. If images map badly,
    that is worth knowing before six weeks go into it.
 
 2. **Retrain on CLAP alone and compare.** One day, no GPU. Decides whether the

@@ -51,9 +51,11 @@ goofy chiptune lives, the ridge between Ominous and Tension.
 anyone has tagged them. This is the one that works on a folder you imported
 five minutes ago.
 
-The sound map names its own regions. It asks the audio what it is against a
-vocabulary of plain descriptions, then puts a signpost where those files sit —
-*heavy impact*, *riser*, *whoosh*, *baby crying*. Nobody types those labels.
+The sound map names its own regions. For effects it sorts them into groups by
+sound, colours each group, and names it from the audio — *heavy impact*,
+*riser*, *whoosh* — or from a filename word the group agrees on, if the model
+hears that word too. Nobody types those labels. Click an effect and the arrow
+keys hop to the nearest sounds, one by one (`docs/sfx-map.md`).
 
 Searching does not rebuild the map. It lights up what matches and dims the
 rest, so the shape you have learned stays put.
@@ -138,9 +140,9 @@ in about a millisecond a frame.
 - **A GPU makes tagging roughly forty times faster.** It works without one. It
   is slow without one.
 - **The effects map is useful, not magic.** Asked how often a sound's nearest
-  neighbour on the map is genuinely from the same family, it scores 16.2%,
-  against 0.16% for chance and 32.7% for what the model itself knows. That is a
-  large improvement on where it started and still leaves room.
+  neighbour on the map is genuinely from the same family, it scores 30.8%,
+  against 0.16% for chance and 32.7% for what the model itself knows (which is
+  what hopping with the arrow keys uses). See `docs/sfx-map.md`.
 - **The shipped model reflects one person's taste.** Retraining on your own
   library is expected, not exotic.
 

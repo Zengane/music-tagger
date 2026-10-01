@@ -103,8 +103,9 @@ Nothing was tested with a GPU, on Windows, or on a Mac in this session.
 
 - **Profiles** (`mtag/profiles.py`): Fast / Balanced / Best / Auto; in the app
   under Settings → Analysis models; `python -m mtag.profiles` for the installer.
-- **PE-AV** (Apache-2.0) for sound search, zero-shot effect categories and the
-  effects map on Balanced/Best. Music: `train.py --encoder
+- **PE-AV** (Apache-2.0) for sound search and zero-shot effect categories on
+  Balanced/Best. (The effects map moved back to general CLAP on 2026-10-01,
+  by measurement: `docs/sfx-map.md`.) Music: `train.py --encoder
   fusion:clap-music+pe-av-base` to measure a MuQ replacement.
   Research and how to measure: `docs/audio-models.md`.
 - Old browser UI moved to `legacy/`.
