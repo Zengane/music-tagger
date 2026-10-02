@@ -210,7 +210,12 @@ def run_probe(args: argparse.Namespace) -> int:
 # ── run ──────────────────────────────────────────────────────────────────────
 
 # Errors that pass: the site refusing for now, or the connection dropping.
-TRANSIENT = re.compile(r"\b(403|429|5\d\d)\b|Forbidden|Too Many Requests|timed? ?out|"
+# The site saying it takes this connection for a bot. Seen on 2026-10-02 after
+# about 630 YouTube downloads in a day: "Sign in to confirm you're not a bot",
+# for every video after that. Not retried: it stops the run.
+BLOCKED = re.compile(r"confirm you.{0,3}re not a bot|Sign in to confirm|\b429\b|Too Many Requests",
+                     re.IGNORECASE)
+TRANSIENT = re.compile(r"\b(403|5\d\d)\b|Forbidden|timed? ?out|"
                        r"Connection (reset|aborted|refused)|Remote end closed|IncompleteRead|"
                        r"Temporary failure|getaddrinfo failed|fragment .* not found", re.IGNORECASE)
 RETRY_WAITS = (5.0, 20.0, 60.0)  # seconds before the 2nd, 3rd and 4th try
@@ -228,6 +233,7 @@ class Runner:
         self.ytdlp = resolve_exe(plan.get("ytdlp") or "yt-dlp")
         self.ffmpeg = resolve_exe(plan.get("ffmpeg") or "ffmpeg")
         self.stop = threading.Event()
+        self.blocked = False
         self.procs: set[subprocess.Popen] = set()
         self.lock = threading.Lock()
         self.gates: dict[tuple[str, str], threading.Lock] = {}
@@ -245,6 +251,15 @@ class Runner:
             if line.strip() == "stop":
                 break
         self.halt()
+
+    def block(self, error: str) -> None:
+        """Stops everything, once, and tells the app why."""
+        with self.lock:
+            first = not self.blocked
+            self.blocked = True
+        if first:
+            emit("blocked", message=error)
+            self.halt()
 
     def halt(self) -> None:
         self.stop.set()
@@ -269,6 +284,11 @@ class Runner:
             a += ["--cookies-from-browser", p["cookies"]]
         if p.get("rate"):
             a += ["--limit-rate", p["rate"]]
+        if p.get("polite", True):
+            # A pause before each video and between the site's API calls:
+            # bursts of hundreds of videos are what gets a connection taken
+            # for a bot. With 3 at a time it adds 1 to 2 seconds per track.
+            a += ["--sleep-requests", "1", "--sleep-interval", "2", "--max-sleep-interval", "5"]
         if item["mode"] == "audio":
             fmt = item.get("audio_format") or "best"
             # Chapters stay in the file as markers: a full soundtrack kept as
@@ -486,6 +506,11 @@ class Runner:
         error = ""
         for attempt in range(len(RETRY_WAITS) + 1):
             final, error = self._run_ytdlp(args, progress)
+            if error and BLOCKED.search(error):
+                # The site has flagged this connection. Every further request
+                # makes the block last longer, so the whole run stops here.
+                self.block(error)
+                return "", "stopped"
             if not error or error == "stopped" or not TRANSIENT.search(error):
                 return final, error
             if attempt < len(RETRY_WAITS) and self.stop.wait(RETRY_WAITS[attempt]):

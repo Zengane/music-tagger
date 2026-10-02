@@ -86,6 +86,14 @@ on long playlists. Such a track is tried again after 5, 20 and 60 seconds.
 If it still fails, its row says why; **Get N more** tries the failed ones
 again later. A private or deleted video is not retried.
 
+**"Sign in to confirm you're not a bot"** (or HTTP 429): YouTube has flagged
+the connection, after about 630 videos in one day on 2026-10-02. Every video
+then fails, and asking again keeps the block going. So the first such answer
+stops the whole run, and the cards say what happened. The block lifts by
+itself, usually within hours; signing in with a browser's cookies (Options)
+also gets past it. **Pause between videos** (Options, on by default) waits 2
+to 5 seconds before each video so a big playlist is less likely to trigger it.
+
 Downloads run at normal priority, unlike analysis, which runs below normal.
 Below normal, they starved while other programs were busy: 6 tracks took
 27.6 s at normal priority and were not done after 9 minutes below normal.

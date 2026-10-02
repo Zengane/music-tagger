@@ -135,6 +135,12 @@ FAKE_YTDLP = r'''
 import os, subprocess, sys
 args = sys.argv[1:]
 # FAIL_FIRST: the first try of each video is refused, as YouTube does.
+calls = os.environ.get("COUNT_CALLS")
+if calls:
+    open(calls, "a").write("x")
+if os.environ.get("BOT_BLOCK"):
+    print("ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies-from-browser", file=sys.stderr)
+    sys.exit(1)
 flag = os.environ.get("FAIL_FIRST")
 if flag:
     mark = os.path.join(flag, args[-1].rsplit("/", 1)[-1] + ".tried")
@@ -264,6 +270,25 @@ class RunTests(unittest.TestCase):
             del os.environ["FAIL_FIRST"]
         states = [e["state"] for e in events if e["event"] == "track" and e["state"] in ("done", "error")]
         self.assertEqual(states, ["done", "done"], events)
+
+    def test_bot_block_stops_the_whole_run(self):
+        plan = self.plan()
+        plan["parallel"] = 1
+        tracks = plan["items"][0]["tracks"]
+        for n in range(3, 9):  # 8 tracks
+            tracks.append(dict(tracks[0], id=f"v{n}", url=f"https://example.invalid/{n}", track=n, title=f"T{n}"))
+        counter = self.tmp / "calls.txt"
+        os.environ["BOT_BLOCK"] = "1"
+        os.environ["COUNT_CALLS"] = str(counter)
+        try:
+            events = self.run_plan(plan)
+        finally:
+            del os.environ["BOT_BLOCK"], os.environ["COUNT_CALLS"]
+        self.assertEqual(len(counter.read_text()), 1, "asked again after being blocked")
+        self.assertEqual([e for e in events if e["event"] == "blocked"][0]["event"], "blocked")
+        self.assertFalse([e for e in events if e["event"] == "track" and e["state"] == "error"])
+        self.assertTrue(download_job.BLOCKED.search("HTTP Error 429: Too Many Requests"))
+        self.assertFalse(download_job.TRANSIENT.search("Sign in to confirm you're not a bot"))
 
     def test_permanent_errors_are_not_retried(self):
         self.assertFalse(download_job.TRANSIENT.search("Video unavailable. This video is private"))

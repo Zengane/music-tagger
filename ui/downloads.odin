@@ -157,6 +157,9 @@ dl: struct {
 	parallel:      int,
 	cover, square_cover, tags, subtitles: bool,
 	add_to_library, game_tag: bool,
+	polite:        bool, // pauses between videos, so the site does not take this for a bot
+	// Set when the site blocked this connection; shown on the cards.
+	block_message: string,
 
 	options_open:  bool,
 	filter:        Dl_Filter,
@@ -195,7 +198,7 @@ dl: struct {
 	next_key:      int,
 } = {
 	edit_item = -1, edit_track = -1,
-	parallel = 3, cover = true, square_cover = true, tags = true,
+	parallel = 3, polite = true, cover = true, square_cover = true, tags = true,
 	add_to_library = true, game_tag = true,
 }
 
@@ -691,6 +694,7 @@ Dl_Plan_Item :: struct {
 Dl_Plan :: struct {
 	ytdlp, ffmpeg, staging, manifest, cookies, rate, extra: string,
 	parallel: int,
+	polite: bool,
 	items: []Dl_Plan_Item,
 }
 
@@ -763,6 +767,7 @@ start_run :: proc() {
 		rate     = strings.trim_space(field_string(&dl.fields[.Rate])),
 		extra    = strings.trim_space(field_string(&dl.fields[.Extra])),
 		parallel = dl.parallel,
+		polite   = dl.polite,
 		items    = items[:],
 	}
 	data, err := json.marshal(plan, {}, context.temp_allocator)
@@ -779,6 +784,7 @@ start_run :: proc() {
 		return
 	}
 	dl.run = s
+	set_owned(&dl.block_message, "")
 	dl.running = true
 	dl.stopping = false
 }
@@ -893,6 +899,9 @@ on_run :: proc(obj: json.Object) {
 		dl_save_soon()
 	case "error":
 		dl_fail_running(json_str(obj, "message"))
+	case "blocked":
+		set_owned(&dl.block_message, json_str(obj, "message"))
+		toast("YouTube is blocking downloads from this connection for now. Downloads stopped.")
 	}
 }
 
@@ -1018,9 +1027,18 @@ poll_downloads :: proc() {
 		stopped := dl.stopping
 		dl.stopping = false
 		for &it in dl.items {
-			if it.state == .Running {
+			// Blocked: the queue waits too, or the next card would start at
+			// once and make the block last longer.
+			if it.state == .Running || (it.state == .Queued && dl.block_message != "") {
 				it.state = .Stopped
-				set_owned(&it.message, stopped ? "Stopped. Resume fetches what is missing." : "The download job ended early")
+				switch {
+				case dl.block_message != "":
+					set_owned(&it.message, "YouTube blocked downloads: \"confirm you're not a bot\". Wait an hour or so, or sign in with browser cookies (Options), then Resume.")
+				case stopped:
+					set_owned(&it.message, "Stopped. Resume fetches what is missing.")
+				case:
+					set_owned(&it.message, "The download job ended early")
+				}
 			}
 			for &t in it.tracks {
 				if t.state == .Downloading || t.state == .Tagging { t.state = .Waiting }
@@ -1062,7 +1080,7 @@ Dl_Saved :: struct {
 	version: int,
 	fields: map[string]string,
 	mode, audio_format, video_quality, pattern, browser, parallel: int,
-	premiere, cover, square_cover, tags, subtitles, add_to_library, game_tag, options_open: bool,
+	premiere, cover, square_cover, tags, subtitles, add_to_library, game_tag, options_open, polite: bool,
 	items: []Dl_Saved_Item,
 }
 
@@ -1087,6 +1105,7 @@ save_downloads :: proc() {
 	s.premiere = dl.premiere; s.cover = dl.cover; s.square_cover = dl.square_cover; s.tags = dl.tags
 	s.subtitles = dl.subtitles; s.add_to_library = dl.add_to_library; s.game_tag = dl.game_tag
 	s.options_open = dl.options_open
+	s.polite = dl.polite
 	items := make([]Dl_Saved_Item, len(dl.items), context.temp_allocator)
 	for &it, i in dl.items {
 		tracks := make([]Dl_Saved_Track, len(it.tracks), context.temp_allocator)
@@ -1129,6 +1148,7 @@ load_downloads :: proc() {
 	if err != nil { return }
 	s: Dl_Saved
 	s.parallel = 3
+	s.polite = true // files saved before the option existed
 	if json.unmarshal(data, &s, allocator = context.temp_allocator) != nil { return }
 	for f in Dl_Field {
 		if v, ok := s.fields[fmt.tprint(f)]; ok { field_set(&dl.fields[f], v) }
@@ -1142,6 +1162,7 @@ load_downloads :: proc() {
 	dl.premiere = s.premiere; dl.cover = s.cover; dl.square_cover = s.square_cover; dl.tags = s.tags
 	dl.subtitles = s.subtitles; dl.add_to_library = s.add_to_library; dl.game_tag = s.game_tag
 	dl.options_open = s.options_open
+	dl.polite = s.polite
 	for &si in s.items {
 		it: Dl_Item
 		it.key = strings.clone(si.key); it.url = strings.clone(si.url); it.title = strings.clone(si.title)
@@ -1977,6 +1998,8 @@ draw_dl_options :: proc(r: Rect) {
 	y += px(22)
 	y = opt_check(x, y, "Add new files to the open library", &dl.add_to_library,
 	              "When the download folder is inside the open library, the new folder is scanned in")
+	y = opt_check(x, y, "Pause between videos (fewer YouTube blocks)", &dl.polite,
+	              "2 to 5 seconds before each video. YouTube blocks connections that fetch hundreds of videos in a burst.")
 	y = opt_check(x, y, "Tag game soundtracks with their game", &dl.game_tag,
 	              "Adds the game tag to the new files. Like any tag, it is written when you press Save.")
 
