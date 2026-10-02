@@ -66,6 +66,19 @@ finished card where you tick more tracks offers **Get N more**.
 **Stop** stops yt-dlp and ffmpeg at once. Half-done files stay in the cache and
 resume next time. Closing the app stops downloads; they wait as **Resume**.
 
+A video that appears twice in a playlist is marked "repeat of 12" and starts
+unticked. (A 331-track playlist had 29 repeats; before this fix the second
+copies showed "already there" or never moved.)
+
+YouTube sometimes refuses a download for a while (HTTP 403, 429), more often
+on long playlists. Such a track is tried again after 5, 20 and 60 seconds.
+If it still fails, its row says why; **Get N more** tries the failed ones
+again later. A private or deleted video is not retried.
+
+Downloads run at normal priority, unlike analysis, which runs below normal.
+Below normal, they starved while other programs were busy: 6 tracks took
+27.6 s at normal priority and were not done after 9 minutes below normal.
+
 ## Options
 
 - Where files go: the download folder, and a folder pattern per category.

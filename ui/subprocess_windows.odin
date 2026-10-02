@@ -65,7 +65,10 @@ build_command_line :: proc(args: []string, allocator := context.temp_allocator) 
 // Starts `args[0]` with stdout on a pipe and no console window.
 // stderr is discarded: these tools are chatty and the app reports failure by
 // the exit code and by having no usable output.
-stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> (s: Stream, ok: bool) {
+// `background` lowers the priority. Downloads pass false: below normal they
+// starved behind the owner's other programs (6 tracks on a busy PC: 27.6 s at
+// normal priority, unfinished after 9 minutes below normal).
+stream_start :: proc(args: []string, working_dir := "", with_stdin := false, background := true) -> (s: Stream, ok: bool) {
 	sa := win32.SECURITY_ATTRIBUTES{
 		nLength        = size_of(win32.SECURITY_ATTRIBUTES),
 		bInheritHandle = true,
@@ -123,7 +126,7 @@ stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> 
 		nil, cmd_w, nil, nil, true,
 		// Below normal: analysis, waveforms and thumbnails all run while you
 		// work, and the desktop and the program you edit in come first.
-		win32.CREATE_NO_WINDOW | win32.CREATE_UNICODE_ENVIRONMENT | BELOW_NORMAL_PRIORITY_CLASS,
+		win32.CREATE_NO_WINDOW | win32.CREATE_UNICODE_ENVIRONMENT | (background ? BELOW_NORMAL_PRIORITY_CLASS : 0),
 		nil, dir_w, &startup, &info,
 	)
 

@@ -61,6 +61,9 @@ Dl_Track :: struct {
 	duration: f32,
 	number:   int,
 	chapter:  int, // 1-based, when the track is a chapter of one long video
+	// The same video earlier in the playlist, by position (1-based), or 0.
+	// Worked out here, not saved: see dl_mark_duplicates.
+	duplicate_of: int,
 	selected: bool,
 	state:    Dl_Track_State,
 	pct:      f32,
@@ -214,7 +217,7 @@ dl_python :: proc() -> string {
 @(private="file")
 tool_start :: proc(kind: Dl_Tool, args: []string) -> bool {
 	clear(&dl.tool_buf)
-	s, ok := stream_start(args)
+	s, ok := stream_start(args, background = false)
 	if !ok { return false }
 	dl.tool = s
 	dl.tool_kind = kind
@@ -383,7 +386,7 @@ start_probe :: proc() {
 	}
 	clear(&dl.probe_pending)
 	clear(&dl.probe_buf)
-	s, ok := stream_start(args[:], project_root())
+	s, ok := stream_start(args[:], project_root(), background = false)
 	if !ok {
 		for u in dl.probe_urls {
 			for &it in dl.items {
@@ -506,11 +509,32 @@ on_probe :: proc(obj: json.Object) {
 				it.split = true
 			}
 		}
+		dl_mark_duplicates(&it, true)
 		// One video on its own is not track 1 of anything.
 		if !it.playlist && !it.chapters { for &t in it.tracks { t.number = 0 } }
 		it.state = .Ready
 		dl_save_soon()
 		return
+	}
+}
+
+// Marks each video that already appeared earlier on the card. With `untick`,
+// repeats not yet downloaded are unticked (a fresh probe, or a queue saved
+// before this existed): downloading one would only find its first copy.
+dl_mark_duplicates :: proc(it: ^Dl_Item, untick: bool) {
+	first := make(map[string]int, len(it.tracks), context.temp_allocator)
+	for &t, i in it.tracks {
+		t.duplicate_of = 0
+		if t.id == "" { continue }
+		if at, seen := first[t.id]; seen {
+			t.duplicate_of = at + 1
+			if untick && t.state != .Done {
+				t.selected = false
+				if t.state == .Skipped || t.state == .Waiting { t.state = .Waiting }
+			}
+		} else {
+			first[t.id] = i
+		}
 	}
 }
 
@@ -616,6 +640,7 @@ dl_folder :: proc(it: ^Dl_Item, allocator := context.temp_allocator) -> string {
 Dl_Plan_Track :: struct {
 	id, url, title, artist: string,
 	track, chapter: int,
+	uid: int, // the track's position on the card: ids repeat in playlists
 }
 
 Dl_Plan_Item :: struct {
@@ -642,9 +667,9 @@ start_run :: proc() {
 	for &it in dl.items {
 		if it.state != .Queued { continue }
 		tracks := make([dynamic]Dl_Plan_Track, 0, len(it.tracks), context.temp_allocator)
-		for &t in it.tracks {
+		for &t, ti in it.tracks {
 			if !t.selected || t.state == .Done || t.state == .Skipped { continue }
-			append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter})
+			append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter, ti})
 			t.state = .Waiting
 			t.pct = 0
 			set_owned(&t.message, "")
@@ -654,7 +679,7 @@ start_run :: proc() {
 			clear(&tracks)
 			title := strings.trim_space(field_string(&it.name))
 			if it.video_title != "" && it.video_title != title { title = it.video_title }
-			append(&tracks, Dl_Plan_Track{it.video_id, it.video_url, title, "", 0, 0})
+			append(&tracks, Dl_Plan_Track{it.video_id, it.video_url, title, "", 0, 0, -1})
 		}
 		fmt_index := clamp(it.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
 		genre := it.category == .Game ? strings.trim_space(field_string(&dl.fields[.Genre])) : ""
@@ -707,7 +732,7 @@ start_run :: proc() {
 	}
 	clear(&dl.run_buf)
 	s, ok := stream_start({dl_python(), join_path({project_root(), "download_job.py"}), "run",
-	                       "--plan", plan_path, "--watch-stdin"}, project_root(), true)
+	                       "--plan", plan_path, "--watch-stdin"}, project_root(), true, background = false)
 	if !ok {
 		dl_fail_running("Python did not start. Run setup, or install Python 3.")
 		return
@@ -768,8 +793,16 @@ on_run :: proc(obj: json.Object) {
 		if it == nil { return }
 		id := json_str(obj, "id")
 		whole := it.chapters && !it.split && id == it.video_id
-		for &t in it.tracks {
-			if (t.id != id && !whole) || !t.selected { continue }
+		// By position when the job says it: a playlist can hold the same
+		// video twice, and matching by id updated the first copy twice and
+		// left the second waiting forever.
+		uid, has_uid := json_int(obj, "uid")
+		for &t, ti in it.tracks {
+			if has_uid && uid >= 0 && !whole {
+				if ti != uid { continue }
+			} else if (t.id != id && !whole) || !t.selected {
+				continue
+			}
 			switch json_str(obj, "state") {
 			case "downloading":
 				t.state = .Downloading
@@ -1031,6 +1064,7 @@ load_downloads :: proc() {
 			if t.state == .Downloading || t.state == .Tagging { t.state = .Waiting }
 			append(&it.tracks, t)
 		}
+		dl_mark_duplicates(&it, true)
 		// Work cut off by closing the app waits to be resumed, not restarted
 		// behind the owner's back.
 		switch it.state {
@@ -1684,7 +1718,10 @@ draw_dl_tracks :: proc(it: ^Dl_Item, index: int, r: Rect) {
 		sx := row.x + row.width - state_w
 		switch t.state {
 		case .Waiting:
-			if it.state == .Running && t.selected {
+			if t.duplicate_of > 0 {
+				draw_text_mid(.Regular, fmt.ctprintf("repeat of %02d", t.duplicate_of), sx, row.y, row.height, FS_SMALL, TEXT_FAINT)
+				tip(rect(sx, row.y, state_w, row.height), "The same video is earlier in the playlist, so this copy is unticked.")
+			} else if it.state == .Running && t.selected {
 				draw_text_mid(.Regular, "waiting", sx, row.y, row.height, FS_SMALL, TEXT_FAINT)
 			}
 		case .Downloading:

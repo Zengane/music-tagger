@@ -155,7 +155,7 @@ def probe_one(url: str, ytdlp: str, thumbs: Path, ffmpeg: str, cookies: str, pat
             "duration": e.get("duration") or 0,
             "uploader": e.get("uploader") or e.get("channel") or "",
         })
-    title = info.get("title") or (entries[0]["title"] if entries else url)
+    title =info.get("title") or (entries[0]["title"] if entries else url)
     uploader = info.get("uploader") or info.get("channel") or ""
     guess = guess_collection(title, [e["title"] for e in entries], uploader)
     if not is_list:
@@ -208,6 +208,12 @@ def run_probe(args: argparse.Namespace) -> int:
 
 
 # ── run ──────────────────────────────────────────────────────────────────────
+
+# Errors that pass: the site refusing for now, or the connection dropping.
+TRANSIENT = re.compile(r"\b(403|429|5\d\d)\b|Forbidden|Too Many Requests|timed? ?out|"
+                       r"Connection (reset|aborted|refused)|Remote end closed|IncompleteRead|"
+                       r"Temporary failure|getaddrinfo failed|fragment .* not found", re.IGNORECASE)
+RETRY_WAITS = (5.0, 20.0, 60.0)  # seconds before the 2nd, 3rd and 4th try
 
 AUDIO_EXTS = {"mp3", "m4a", "opus", "ogg", "flac", "wav", "aac", "webm", "mka", "alac"}
 VIDEO_EXTS = {"mp4", "mkv", "webm", "mov", "avi", "m4v"}
@@ -454,6 +460,23 @@ class Runner:
             return "", _last_error("\n".join(err_lines))
         return final, ""
 
+    def _run_ytdlp_retrying(self, args: list[str], progress) -> tuple[str, str]:
+        """_run_ytdlp, tried again after a pause when YouTube refuses for now.
+
+        A 403 on a long playlist is YouTube turning a request away, not a
+        broken video: of 15 that failed on a 331-track playlist, the three
+        tried again a few minutes later all downloaded. yt-dlp's own
+        --retries repeats the same address; a new run asks for a fresh one.
+        """
+        error = ""
+        for attempt in range(len(RETRY_WAITS) + 1):
+            final, error = self._run_ytdlp(args, progress)
+            if not error or error == "stopped" or not TRANSIENT.search(error):
+                return final, error
+            if attempt < len(RETRY_WAITS) and self.stop.wait(RETRY_WAITS[attempt]):
+                return "", "stopped"
+        return "", f"{error} (tried {len(RETRY_WAITS) + 1} times; try again later)"
+
     def _workdir(self, item: dict, track: dict) -> tuple[Path, Path]:
         work = self.staging / safe_filename(item["key"])
         work.mkdir(parents=True, exist_ok=True)
@@ -468,7 +491,7 @@ class Runner:
         key, tid = item["key"], track.get("id") or ""
         try:
             if item.get("metadata", True) or cover is not None:
-                emit("track", key=key, id=tid, state="tagging", pct=100)
+                emit("track", key=key, id=tid, uid=track.get("uid"), state="tagging", pct=100)
                 src = self.tag(src, item, track, cover)
             dest = self.place(src, item, track, folder)
         except (OSError, RuntimeError) as exc:
@@ -476,7 +499,7 @@ class Runner:
         with self.lock:
             if tid:
                 self.manifest[f"{tid}:{item['mode']}"] = str(dest)
-        emit("track", key=key, id=tid, state="done", path=str(dest))
+        emit("track", key=key, id=tid, uid=track.get("uid"), state="done", path=str(dest))
         return "done", str(dest)
 
     def _download(self, item: dict, track: dict) -> tuple[str, str]:
@@ -486,13 +509,13 @@ class Runner:
             return "stopped", ""
         existing = self.already_there(item, track, folder)
         if existing:
-            emit("track", key=key, id=tid, state="skipped", path=existing)
+            emit("track", key=key, id=tid, uid=track.get("uid"), state="skipped", path=existing)
             return "skipped", existing
         work, base = self._workdir(item, track)
-        emit("track", key=key, id=tid, state="downloading", pct=0)
-        final, error = self._run_ytdlp(
+        emit("track", key=key, id=tid, uid=track.get("uid"), state="downloading", pct=0)
+        final, error = self._run_ytdlp_retrying(
             self.ytdlp_args(item, track, base),
-            lambda pct, speed, eta: emit("track", key=key, id=tid, state="downloading",
+            lambda pct, speed, eta: emit("track", key=key, id=tid, uid=track.get("uid"), state="downloading",
                                          pct=pct, speed=speed, eta=eta))
         if error == "stopped":
             return "stopped", ""
@@ -523,7 +546,7 @@ class Runner:
         for t in tracks:
             existing = self.already_there(item, t, folder)
             if existing:
-                emit("track", key=key, id=t.get("id") or "", state="skipped", path=existing)
+                emit("track", key=key, id=t.get("id") or "", uid=t.get("uid"), state="skipped", path=existing)
                 results.append((t, "skipped", existing))
             else:
                 todo.append(t)
@@ -532,16 +555,16 @@ class Runner:
         video = {"id": item.get("video_id") or "", "url": item.get("video_url") or todo[0]["url"]}
         work, base = self._workdir(item, video)
         for t in todo:
-            emit("track", key=key, id=t.get("id") or "", state="downloading", pct=0)
+            emit("track", key=key, id=t.get("id") or "", uid=t.get("uid"), state="downloading", pct=0)
         args = self.ytdlp_args(item, video, base)
         url = args.pop()
         args += ["--split-chapters", "-o", "chapter:" + str(base) + " - %(section_number)03d.%(ext)s", url]
 
         def progress(pct, speed, eta):
             for t in todo:
-                emit("track", key=key, id=t.get("id") or "", state="downloading", pct=pct, speed=speed, eta=eta)
+                emit("track", key=key, id=t.get("id") or "", uid=t.get("uid"), state="downloading", pct=pct, speed=speed, eta=eta)
 
-        final, error = self._run_ytdlp(args, progress)
+        final, error = self._run_ytdlp_retrying(args, progress)
         if error:
             state = "stopped" if error == "stopped" else "error"
             return results + [(t, state, error if state == "error" else "") for t in todo]
@@ -589,7 +612,7 @@ class Runner:
 
         def record(it: dict, tr: dict, state: str, detail: str) -> None:
             if state == "error":
-                emit("track", key=it["key"], id=tr.get("id") or "", state="error", message=detail)
+                emit("track", key=it["key"], id=tr.get("id") or "", uid=tr.get("uid"), state="error", message=detail)
             with self.lock:
                 c = counts[it["key"]]
                 c["left"] -= 1

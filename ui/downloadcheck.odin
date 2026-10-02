@@ -101,6 +101,13 @@ run_download_check :: proc(args: []string) -> int {
 		fmt.printf("  %-12v %-40s %3d tracks  %v  -> %s\n", it.state, field_string(&it.name), len(it.tracks),
 		           it.category, dl_folder(&it))
 		if it.state == .Probe_Failed { fmt.printf("    message: %s\n", it.message); failures += 1 }
+		repeats, ticked, to_get := 0, 0, 0
+		for &t in it.tracks {
+			if t.duplicate_of > 0 { repeats += 1 }
+			if t.selected { ticked += 1 }
+			if t.selected && t.state != .Done && t.state != .Skipped { to_get += 1 }
+		}
+		fmt.printfln("    repeats %d, ticked %d, still to get %d", repeats, ticked, to_get)
 		for &t, i in it.tracks {
 			if i >= 4 { break }
 			fmt.printf("    %02d  %-36s  %-24s  (was: %s)\n", t.number, t.title, t.artist, t.original)

@@ -84,7 +84,8 @@ ignore_sigpipe :: proc() {
 
 // Starts `args[0]` with stdout (and stderr) on a pipe. `args[0]` is looked up
 // on PATH when it has no slash in it, as a shell would.
-stream_start :: proc(args: []string, working_dir := "", with_stdin := false) -> (s: Stream, ok: bool) {
+// `background` matters on Windows only; nothing here lowers the priority.
+stream_start :: proc(args: []string, working_dir := "", with_stdin := false, background := true) -> (s: Stream, ok: bool) {
 	if len(args) == 0 { return {}, false }
 	ignore_sigpipe()
 

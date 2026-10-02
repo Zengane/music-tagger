@@ -132,8 +132,16 @@ class NameTests(unittest.TestCase):
 
 
 FAKE_YTDLP = r'''
-import subprocess, sys
+import os, subprocess, sys
 args = sys.argv[1:]
+# FAIL_FIRST: the first try of each video is refused, as YouTube does.
+flag = os.environ.get("FAIL_FIRST")
+if flag:
+    mark = os.path.join(flag, args[-1].rsplit("/", 1)[-1] + ".tried")
+    if not os.path.exists(mark):
+        open(mark, "w").close()
+        print("ERROR: unable to download video data: HTTP Error 403: Forbidden", file=sys.stderr)
+        sys.exit(1)
 out = args[args.index("-o") + 1]
 ffmpeg = args[args.index("--ffmpeg-location") + 1]
 fmt = args[args.index("--audio-format") + 1] if "--audio-format" in args else "best"
@@ -244,6 +252,31 @@ class RunTests(unittest.TestCase):
         placed = runner.place(src, plan["items"][0], plan["items"][0]["tracks"][0], self.folder)
         self.assertEqual(placed.name, "01 - Beverly Chills (2).opus")
         self.assertEqual((self.folder / "01 - Beverly Chills.opus").read_bytes(), b"old")
+
+    def test_403_is_tried_again(self):
+        old = download_job.RETRY_WAITS
+        download_job.RETRY_WAITS = (0.01, 0.01)
+        os.environ["FAIL_FIRST"] = str(self.tmp)
+        try:
+            events = self.run_plan(self.plan())
+        finally:
+            download_job.RETRY_WAITS = old
+            del os.environ["FAIL_FIRST"]
+        states = [e["state"] for e in events if e["event"] == "track" and e["state"] in ("done", "error")]
+        self.assertEqual(states, ["done", "done"], events)
+
+    def test_permanent_errors_are_not_retried(self):
+        self.assertFalse(download_job.TRANSIENT.search("Video unavailable. This video is private"))
+        self.assertTrue(download_job.TRANSIENT.search("unable to download video data: HTTP Error 403: Forbidden"))
+
+    def test_events_carry_the_track_position(self):
+        # The same video twice in a playlist: the app tells them apart by uid.
+        plan = self.plan()
+        for i, t in enumerate(plan["items"][0]["tracks"]):
+            t["uid"] = i + 10
+        events = self.run_plan(plan)
+        uids = {e["uid"] for e in events if e["event"] == "track"}
+        self.assertEqual(uids, {10, 11})
 
     def test_missing_ytdlp_is_an_error_not_a_crash(self):
         plan = self.plan()
