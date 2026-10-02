@@ -1,6 +1,6 @@
 package musictagger
 
-// `--downloadcheck <folder> <link> [<link> ...] [--run N] [--library]`
+// `--downloadcheck <folder> <link> [<link> ...] [--run N] [--library] [--replace]`
 //
 // The Downloads screen end to end, in a hidden window: yt-dlp's update check,
 // reading the links, and with --run the first N tracks of each actually
@@ -27,9 +27,12 @@ run_download_check :: proc(args: []string) -> int {
 	links := make([dynamic]string, context.temp_allocator)
 	run_n := 0
 	as_library := false
+	replace := false
 	for i := 1; i < len(args); i += 1 {
 		if args[i] == "--library" {
 			as_library = true
+		} else if args[i] == "--replace" {
+			replace = true
 		} else if args[i] == "--run" && i + 1 < len(args) {
 			run_n, _ = strconv.parse_int(args[i + 1])
 			i += 1
@@ -82,6 +85,7 @@ run_download_check :: proc(args: []string) -> int {
 		fmt.printfln("library:           %s, %d files", lib.root, len(lib.tracks))
 	}
 	downloads_startup()
+	if replace { dl.audio_format = 1 } // the original stream (Opus) first, to be replaced
 	dl.open = true
 	field_set(&dl.fields[.Root], folder)
 	shot("empty")
@@ -108,6 +112,8 @@ run_download_check :: proc(args: []string) -> int {
 			if t.selected && t.state != .Done && t.state != .Skipped { to_get += 1 }
 		}
 		fmt.printfln("    repeats %d, ticked %d, still to get %d", repeats, ticked, to_get)
+		fmt.printfln("    format %s, files in another format %d, card says: %s",
+		             DL_AUDIO_FORMAT_NAMES[it.audio_format], dl_other_format(&it), it.message)
 		for &t, i in it.tracks {
 			if i >= 4 { break }
 			fmt.printf("    %02d  %-36s  %-24s  (was: %s)\n", t.number, t.title, t.artist, t.original)
@@ -140,9 +146,27 @@ run_download_check :: proc(args: []string) -> int {
 			}
 		}
 		shot("done")
+		if replace {
+			// What "Replace N as M4A" does, after a download in another format.
+			for &it in dl.items {
+				it.audio_format = 0
+				fmt.printfln("replace:           %d files in another format", dl_other_format(&it))
+				for &t in it.tracks { if dl_track_needs_format(&it, &t) { t.replace = true; t.state = .Waiting } }
+				it.state = .Queued
+			}
+			ok = wait(proc() -> bool { return !dl.running && downloads_active() == 0 }, 900)
+			for &it in dl.items {
+				fmt.printfln("  %v %s: %s, still in another format: %d", it.state, field_string(&it.name), it.message, dl_other_format(&it))
+				for &t in it.tracks {
+					if !t.selected { continue }
+					fmt.printfln("    %-8v %s%s", t.state, t.path, t.message != "" ? fmt.tprintf("  [%s]", t.message) : "")
+					if t.state == .Failed { failures += 1 }
+				}
+			}
+		}
 		if as_library {
 			// The scan and the tag come a moment after the download.
-			_ = wait(proc() -> bool { return len(dl.pending_tags) == 0 && !scan.running && len(import_folder_queue) == 0 }, 120)
+			_ = wait(proc() -> bool { return len(dl.pending_tags) == 0 && len(dl.retired) == 0 && !scan.running && len(import_folder_queue) == 0 }, 120)
 			fmt.printfln("library now:       %d files", len(lib.tracks))
 			unsaved := 0
 			for &t in lib.tracks {

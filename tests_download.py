@@ -278,6 +278,52 @@ class RunTests(unittest.TestCase):
         uids = {e["uid"] for e in events if e["event"] == "track"}
         self.assertEqual(uids, {10, 11})
 
+    def test_m4a_prefers_the_sites_own_aac(self):
+        runner = download_job.Runner(self.plan("m4a"))
+        args = runner.ytdlp_args(self.plan("m4a")["items"][0], {"url": "u", "id": "i"}, self.tmp / "x")
+        self.assertEqual(args[args.index("-f") + 1], "bestaudio[ext=m4a]/bestaudio/best")
+        args = runner.ytdlp_args(self.plan("best")["items"][0], {"url": "u", "id": "i"}, self.tmp / "x")
+        self.assertEqual(args[args.index("-f") + 1], "bestaudio/best")
+
+    def test_replace_opus_with_m4a_keeps_the_tags(self):
+        self.folder.mkdir(parents=True)
+        old = self.folder / "01 - Beverly Chills.opus"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1",
+                        "-c:a", "libopus", str(old)], check=True)
+        (self.folder / ".ts").mkdir()
+        sidecar = {"tags": [{"title": "Lethal-League-Blaze"}]}
+        (self.folder / ".ts" / (old.name + ".json")).write_text(json.dumps(sidecar))
+        plan = self.plan("m4a")
+        plan["items"][0]["tracks"] = plan["items"][0]["tracks"][:1]
+        plan["items"][0]["tracks"][0]["replace"] = str(old)
+        # A stand-in for the Recycle Bin, so the tests leave nothing in the real one.
+        trashed = []
+        real = download_job.send_to_trash
+        download_job.send_to_trash = lambda p: (trashed.append(p.name), p.unlink(), True)[-1]
+        try:
+            events = self.run_plan(plan)
+        finally:
+            download_job.send_to_trash = real
+        self.assertEqual(trashed, [old.name])
+        done = [e for e in events if e["event"] == "track" and e["state"] == "done"]
+        self.assertEqual(len(done), 1, events)
+        new = self.folder / "01 - Beverly Chills.m4a"
+        self.assertTrue(new.exists())
+        self.assertFalse(old.exists())
+        self.assertEqual(done[0]["replaced"], "recycled")
+        self.assertEqual(json.loads((self.folder / ".ts" / (new.name + ".json")).read_text()), sidecar)
+        self.assertFalse((self.folder / ".ts" / (old.name + ".json")).exists())
+
+    def test_replace_skips_a_file_already_in_the_format(self):
+        self.folder.mkdir(parents=True)
+        (self.folder / "01 - Beverly Chills.opus").write_bytes(b"old")
+        (self.folder / "01 - Beverly Chills.m4a").write_bytes(b"there")
+        plan = self.plan("m4a")
+        plan["items"][0]["tracks"] = plan["items"][0]["tracks"][:1]
+        plan["items"][0]["tracks"][0]["replace"] = str(self.folder / "01 - Beverly Chills.opus")
+        events = self.run_plan(plan)
+        self.assertEqual([e["state"] for e in events if e["event"] == "track"], ["skipped"])
+
     def test_missing_ytdlp_is_an_error_not_a_crash(self):
         plan = self.plan()
         plan["ytdlp"] = str(self.tmp / "nope" / "yt-dlp.exe")

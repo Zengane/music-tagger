@@ -34,11 +34,22 @@ it whole; the chapters then stay in the file as markers.
 
 ## Formats
 
-Audio, default **Best quality**: the original sound, not converted (usually
-Opus, sometimes M4A). Also MP3 320, FLAC, M4A, Opus, WAV.
+Audio, default **M4A for Premiere**: YouTube's own AAC stream (about 128
+kbps), put into an M4A as it is, nothing converted. Premiere and everything
+else open it. When a video has no AAC stream, the original is converted to AAC
+at 256 kbps. Also: **Original (Opus)**, the stream as YouTube has it, usually
+Opus, which Premiere does not open; MP3 320; FLAC; Opus; WAV.
 
-Premiere does not open Opus. For audio you will edit with, choose MP3 320 or
-M4A.
+Until 2026-10-02 the default was the original stream, so downloads came out
+as Opus. A queue saved before then switches to M4A when it loads.
+
+**Replace N as M4A**: a finished card whose files are in another format than
+the card's offers this. Each track is downloaded again in the card's format.
+The sidecar (saved tags, markers) moves to the new file, and the old file goes
+to the Recycle Bin, never deleted outright: on a drive with no Recycle Bin the
+old file stays. In the open library the old entry hands its tags, saved or
+not, to the new one and leaves the list. Change the card's format first to
+replace with something else (MP3, FLAC).
 
 Video, default **Best quality** (often AV1 or VP9 in MKV). Also 4K, 1440p,
 1080p, 720p, 480p, and **MP4 for Premiere** (H.264 and AAC, which every editor

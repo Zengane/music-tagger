@@ -175,5 +175,7 @@ Open issues: `docs/audit-2026-10.md`. Model notes: `docs/audio-models.md`,
   (hidden window, real links, screenshots in `work\`).
 - Downloads go only to the folder the owner picks. Game tags are added
   unsaved; Save writes them.
+- Default audio is M4A (YouTube AAC, unconverted): Premiere does not open
+  Opus. Finished cards in another format offer "Replace N as M4A".
 - Not done: other sites than YouTube untried; a full-OST video downloads whole
   even when only some chapters are wanted.

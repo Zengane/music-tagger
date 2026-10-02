@@ -27,6 +27,8 @@ package musictagger
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import rl "vendor:raylib"
@@ -38,16 +40,23 @@ Dl_Track_State :: enum u8 { Waiting, Downloading, Tagging, Done, Skipped, Failed
 Ytdlp_State   :: enum u8 { Unknown, Updating, Checking, Ready, Missing, Installing, Failed }
 Dl_Tool       :: enum u8 { None, Update, Version, Install }
 
-DL_AUDIO_FORMATS := [?]string{"best", "mp3", "flac", "m4a", "opus", "wav"}
-DL_AUDIO_FORMAT_NAMES := [?]cstring{"Best quality", "MP3 320", "FLAC", "M4A", "Opus", "WAV"}
+// M4A first, and the default: the owner edits in Premiere, which does not open
+// Opus, and "best" on YouTube is Opus. YouTube also serves AAC, which goes
+// into the M4A as it is, so the default loses nothing to a conversion.
+// Saved files from before (version 1) had "best" first; load_downloads maps.
+DL_AUDIO_FORMATS := [?]string{"m4a", "best", "mp3", "flac", "opus", "wav"}
+DL_AUDIO_FORMAT_NAMES := [?]cstring{"M4A for Premiere", "Original (Opus)", "MP3 320", "FLAC", "Opus", "WAV"}
 DL_AUDIO_FORMAT_TIPS := [?]string{
-	"The original sound, not converted: usually Opus or M4A. Best quality, smallest file.",
-	"MP3 at 320 kbps. Opens everywhere, Premiere included. Converted, so a little is lost.",
-	"FLAC. Lossless container for the original sound; large.",
-	"M4A (AAC). Opens in Premiere. Converted.",
+	"M4A (AAC). Opens in Premiere and everywhere. YouTube's own AAC stream, kept as it is: nothing converted.",
+	"The original stream, not converted: on YouTube usually Opus, which Premiere does not open.",
+	"MP3 at 320 kbps. Opens everywhere. Converted from the original, so a little is lost.",
+	"FLAC. Lossless container for the original sound; large. Premiere does not open it.",
 	"Opus. Small and very good; Premiere does not open it.",
 	"WAV. Uncompressed; very large, no cover art.",
 }
+// What the files of each choice end in, to see which files are in another
+// format. "" for the original stream, which can be anything.
+DL_AUDIO_FORMAT_EXTS := [?]string{".m4a", "", ".mp3", ".flac", ".opus", ".wav"}
 DL_VIDEO_QUALITIES := [?]string{"best", "2160", "1440", "1080", "720", "480"}
 DL_VIDEO_QUALITY_NAMES := [?]cstring{"Best quality", "4K", "1440p", "1080p", "720p", "480p"}
 DL_CATEGORY_NAMES := [Dl_Category]cstring{.Game = "Game OST", .Music = "Music", .Video = "Video", .Other = "Other"}
@@ -64,6 +73,8 @@ Dl_Track :: struct {
 	// The same video earlier in the playlist, by position (1-based), or 0.
 	// Worked out here, not saved: see dl_mark_duplicates.
 	duplicate_of: int,
+	// Fetch again in the card's format, replacing the file at `path`.
+	replace: bool,
 	selected: bool,
 	state:    Dl_Track_State,
 	pct:      f32,
@@ -117,6 +128,13 @@ DL_FIELD_DEFAULTS := [Dl_Field]string{
 
 Dl_Menu :: enum u8 { None, Category, Format, Header_Format, Pattern, Browser, Parallel }
 Dl_Filter :: enum u8 { All, Ready, Active, Done, Failed }
+
+// A file replaced by the same track in another format. The library still
+// lists the old one until it is swapped for the new one; see apply_retired.
+Dl_Retired :: struct {
+	old, new: string, // owned
+	until: f64,
+}
 
 Dl_Pending_Tag :: struct {
 	folder, tag: string, // owned
@@ -172,6 +190,7 @@ dl: struct {
 	ytdlp_note:    string,
 
 	pending_tags:  [dynamic]Dl_Pending_Tag,
+	retired:       [dynamic]Dl_Retired,
 	save_at:       f64, // when to write downloads.json, 0 for nothing waiting
 	next_key:      int,
 } = {
@@ -518,6 +537,21 @@ on_probe :: proc(obj: json.Object) {
 	}
 }
 
+// The card's line once a run ends: files, and why the count is not the
+// playlist's length when it is not.
+dl_set_summary :: proc(it: ^Dl_Item) {
+	files, repeats := 0, 0
+	for &t in it.tracks {
+		if t.duplicate_of > 0 { repeats += 1; continue }
+		if (t.state == .Done || t.state == .Skipped) && t.path != "" { files += 1 }
+	}
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%d files", files)
+	if repeats > 0 { fmt.sbprintf(&b, " (%d videos are in the playlist twice)", repeats) }
+	if it.failed > 0 { fmt.sbprintf(&b, ", %d failed", it.failed) }
+	set_owned(&it.message, strings.to_string(b))
+}
+
 // Marks each video that already appeared earlier on the card. With `untick`,
 // repeats not yet downloaded are unticked (a fresh probe, or a queue saved
 // before this existed): downloading one would only find its first copy.
@@ -641,6 +675,7 @@ Dl_Plan_Track :: struct {
 	id, url, title, artist: string,
 	track, chapter: int,
 	uid: int, // the track's position on the card: ids repeat in playlists
+	replace: string, // the file a new format replaces, or ""
 }
 
 Dl_Plan_Item :: struct {
@@ -668,8 +703,12 @@ start_run :: proc() {
 		if it.state != .Queued { continue }
 		tracks := make([dynamic]Dl_Plan_Track, 0, len(it.tracks), context.temp_allocator)
 		for &t, ti in it.tracks {
-			if !t.selected || t.state == .Done || t.state == .Skipped { continue }
-			append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter, ti})
+			if t.replace && t.path != "" {
+				append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter, ti, t.path})
+			} else {
+				if !t.selected || t.state == .Done || t.state == .Skipped { continue }
+				append(&tracks, Dl_Plan_Track{t.id, t.url, t.title, t.artist, t.number, t.chapter, ti, ""})
+			}
 			t.state = .Waiting
 			t.pct = 0
 			set_owned(&t.message, "")
@@ -679,7 +718,7 @@ start_run :: proc() {
 			clear(&tracks)
 			title := strings.trim_space(field_string(&it.name))
 			if it.video_title != "" && it.video_title != title { title = it.video_title }
-			append(&tracks, Dl_Plan_Track{it.video_id, it.video_url, title, "", 0, 0, -1})
+			append(&tracks, Dl_Plan_Track{it.video_id, it.video_url, title, "", 0, 0, -1, ""})
 		}
 		fmt_index := clamp(it.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
 		genre := it.category == .Game ? strings.trim_space(field_string(&dl.fields[.Genre])) : ""
@@ -688,7 +727,9 @@ start_run :: proc() {
 			url           = it.url,
 			mode          = it.mode == .Audio ? "audio" : "video",
 			audio_format  = DL_AUDIO_FORMATS[fmt_index],
-			audio_quality = DL_AUDIO_FORMATS[fmt_index] == "mp3" ? "320K" : "0",
+			// MP3 at 320; M4A at 256 only when it has to be converted (YouTube's
+			// own AAC is kept as it is).
+			audio_quality = DL_AUDIO_FORMATS[fmt_index] == "mp3" ? "320K" : (DL_AUDIO_FORMATS[fmt_index] == "m4a" ? "256K" : "0"),
 			video_quality = DL_VIDEO_QUALITIES[clamp(it.video_quality, 0, len(DL_VIDEO_QUALITIES) - 1)],
 			video_codec   = it.premiere ? "premiere" : "any",
 			folder        = dl_folder(&it),
@@ -815,10 +856,18 @@ on_run :: proc(obj: json.Object) {
 			case "done":
 				t.state = .Done
 				t.pct = 100
+				t.replace = false
+				if json_str(obj, "replaced") == "recycled" && t.path != "" {
+					append(&dl.retired, Dl_Retired{strings.clone(t.path), strings.clone(json_str(obj, "path")), rl.GetTime() + 600})
+				}
 				set_owned(&t.path, json_str(obj, "path"))
+				if json_str(obj, "replaced") == "kept" {
+					set_owned(&t.message, "The old file could not go to the Recycle Bin; it is still beside the new one.")
+				}
 			case "skipped":
 				t.state = .Skipped
 				t.pct = 100
+				t.replace = false
 				set_owned(&t.path, json_str(obj, "path"))
 			case "error":
 				t.state = .Failed
@@ -839,11 +888,7 @@ on_run :: proc(obj: json.Object) {
 		if it == nil || json_str(obj, "state") != "done" { return }
 		it.state = .Done
 		folder := json_str(obj, "folder")
-		if it.failed > 0 {
-			set_owned(&it.message, fmt.tprintf("%d downloaded, %d already there, %d failed", it.done, it.skipped, it.failed))
-		} else {
-			set_owned(&it.message, fmt.tprintf("%d downloaded, %d already there", it.done, it.skipped))
-		}
+		dl_set_summary(it)
 		dl_after_item(it, folder)
 		dl_save_soon()
 	case "error":
@@ -900,6 +945,55 @@ apply_pending_tags :: proc() {
 	}
 }
 
+// Once the scan has the new file, the old entry hands over its tags and
+// markers, saved or not, and leaves the library. Without this the library kept
+// listing the Opus files after they went to the Recycle Bin, and Save would
+// have written sidecars for files that are not there.
+@(private="file")
+apply_retired :: proc() {
+	if len(dl.retired) == 0 || scan.running || len(import_folder_queue) > 0 { return }
+	by_path := make(map[string]int, len(lib.tracks), context.temp_allocator)
+	for &t, i in lib.tracks { by_path[path_key(t.path)] = i }
+	gone := make([dynamic]int, 0, len(dl.retired), context.temp_allocator)
+	moved := 0
+	for i := len(dl.retired) - 1; i >= 0; i -= 1 {
+		r := dl.retired[i]
+		old_i, has_old := by_path[path_key(r.old)]
+		new_i, has_new := by_path[path_key(r.new)]
+		if has_old && !has_new && rl.GetTime() < r.until { continue } // the scan is still to come
+		if has_old && has_new && !os.exists(r.old) {
+			old_t, new_t := &lib.tracks[old_i], &lib.tracks[new_i]
+			for tag in old_t.tags {
+				already := false
+				for have in new_t.tags { if have == tag { already = true; break } }
+				if !already { add_tag_to_track(new_t, tag) }
+			}
+			if len(new_t.cues) == 0 && len(old_t.cues) > 0 {
+				for c in old_t.cues { append(&new_t.cues, c) }
+				new_t.cues_dirty = true
+			}
+			moved += 1
+		}
+		if has_old && !os.exists(r.old) { append(&gone, old_i) }
+		delete(r.old)
+		delete(r.new)
+		ordered_remove(&dl.retired, i)
+	}
+	if len(gone) == 0 { return }
+	slice.sort(gone[:])
+	slice.reverse(gone[:])
+	for index in gone { forget_track(index) }
+	clear(&app.selection)
+	app.selected = -1
+	app.anchor = -1
+	if player.track >= len(lib.tracks) { stop_playback() }
+	count_tags()
+	search.dirty = true
+	invalidate_tagging()
+	invalidate_nodes()
+	toast(fmt.tprintf("%d files replaced by their new format; tags moved to them", moved))
+}
+
 // ── each frame ──────────────────────────────────────────────────────────────
 
 poll_downloads :: proc() {
@@ -935,6 +1029,7 @@ poll_downloads :: proc() {
 		dl_save_soon()
 	}
 	start_run()
+	apply_retired()
 	apply_pending_tags()
 	if dl.save_at > 0 && rl.GetTime() > dl.save_at { save_downloads() }
 }
@@ -951,7 +1046,7 @@ Dl_Saved_Track :: struct {
 	id, url, original, title, artist, path: string,
 	duration: f32,
 	number, state, chapter: int,
-	selected: bool,
+	selected, replace: bool,
 }
 
 Dl_Saved_Item :: struct {
@@ -984,7 +1079,7 @@ save_downloads :: proc() {
 	dl.save_at = 0
 	if !dl.loaded { return }
 	s: Dl_Saved
-	s.version = 1
+	s.version = 2 // 2: M4A first in the audio formats
 	s.fields = make(map[string]string, 16, context.temp_allocator)
 	for f in Dl_Field { s.fields[fmt.tprint(f)] = field_string(&dl.fields[f]) }
 	s.mode = int(dl.mode); s.audio_format = dl.audio_format; s.video_quality = dl.video_quality
@@ -996,7 +1091,7 @@ save_downloads :: proc() {
 	for &it, i in dl.items {
 		tracks := make([]Dl_Saved_Track, len(it.tracks), context.temp_allocator)
 		for &t, j in it.tracks {
-			tracks[j] = {t.id, t.url, t.original, t.title, t.artist, t.path, t.duration, t.number, int(t.state), t.chapter, t.selected}
+			tracks[j] = {t.id, t.url, t.original, t.title, t.artist, t.path, t.duration, t.number, int(t.state), t.chapter, t.selected, t.replace}
 		}
 		items[i] = {
 			it.key, it.url, it.title, it.uploader, it.thumb, it.year,
@@ -1017,6 +1112,16 @@ save_downloads :: proc() {
 	}
 }
 
+// A saved audio format, as an index into today's list. Version 1 saved them in
+// the order best, mp3, flac, m4a, opus, wav; "best" (Opus on YouTube) becomes
+// M4A, because Premiere cannot open Opus and that is what the owner hit.
+@(private="file")
+dl_audio_format_from :: proc(saved, version: int) -> int {
+	if version >= 2 { return clamp(saved, 0, len(DL_AUDIO_FORMATS) - 1) }
+	old_to_new := [6]int{0, 2, 3, 0, 4, 5}
+	return old_to_new[clamp(saved, 0, 5)]
+}
+
 load_downloads :: proc() {
 	defer dl.loaded = true
 	for f in Dl_Field { field_set(&dl.fields[f], DL_FIELD_DEFAULTS[f]) }
@@ -1029,7 +1134,7 @@ load_downloads :: proc() {
 		if v, ok := s.fields[fmt.tprint(f)]; ok { field_set(&dl.fields[f], v) }
 	}
 	dl.mode = Dl_Mode(clamp(s.mode, 0, 1))
-	dl.audio_format = clamp(s.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
+	dl.audio_format = dl_audio_format_from(s.audio_format, s.version)
 	dl.video_quality = clamp(s.video_quality, 0, len(DL_VIDEO_QUALITIES) - 1)
 	dl.pattern = clamp(s.pattern, 0, len(DL_PATTERNS) - 1)
 	dl.browser = clamp(s.browser, 0, len(DL_BROWSERS) - 1)
@@ -1050,7 +1155,7 @@ load_downloads :: proc() {
 		it.video_title = strings.clone(si.video_title)
 		it.category = Dl_Category(clamp(si.category, 0, len(Dl_Category) - 1))
 		it.mode = Dl_Mode(clamp(si.mode, 0, 1))
-		it.audio_format = clamp(si.audio_format, 0, len(DL_AUDIO_FORMATS) - 1)
+		it.audio_format = dl_audio_format_from(si.audio_format, s.version)
 		it.video_quality = clamp(si.video_quality, 0, len(DL_VIDEO_QUALITIES) - 1)
 		it.pattern = clamp(si.pattern, 0, len(DL_PATTERNS) - 1)
 		it.state = Dl_State(clamp(si.state, 0, len(Dl_State) - 1))
@@ -1060,11 +1165,13 @@ load_downloads :: proc() {
 			t.id = strings.clone(st.id); t.url = strings.clone(st.url); t.original = strings.clone(st.original)
 			t.title = strings.clone(st.title); t.artist = strings.clone(st.artist); t.path = strings.clone(st.path)
 			t.duration = st.duration; t.number = st.number; t.selected = st.selected; t.chapter = st.chapter
+			t.replace = st.replace
 			t.state = Dl_Track_State(clamp(st.state, 0, len(Dl_Track_State) - 1))
 			if t.state == .Downloading || t.state == .Tagging { t.state = .Waiting }
 			append(&it.tracks, t)
 		}
 		dl_mark_duplicates(&it, true)
+		if it.state == .Done { dl_set_summary(&it) }
 		// Work cut off by closing the app waits to be resumed, not restarted
 		// behind the owner's back.
 		switch it.state {
@@ -1469,8 +1576,26 @@ draw_dl_card :: proc(it: ^Dl_Item, index: int, r: Rect) -> bool {
 		// Tracks ticked after the first run: offer them, rather than the folder.
 		more := 0
 		for &t in it.tracks { if t.selected && t.state != .Done && t.state != .Skipped { more += 1 } }
+		other := dl_other_format(it)
 		if more > 0 {
 			if icon_label_button(act, .Import, fmt.ctprintf("Get %d more", more), .Primary, dl.ytdlp == .Ready) {
+				it.state = .Queued
+				dl_save_soon()
+			}
+		} else if other > 0 {
+			// Files in another format than the card's: fetch them again in
+			// this one. The old file goes to the Recycle Bin and its tags
+			// move to the new file.
+			ext := DL_AUDIO_FORMAT_EXTS[it.audio_format]
+			label := fmt.ctprintf("Replace %d as %s", other, strings.to_upper(ext[1:], context.temp_allocator))
+			act.x -= px(40)
+			act.width += px(40)
+			tip(act, fmt.tprintf("%d files here are not %s. Download them again as %s; the old files go to the Recycle Bin and keep their tags.",
+			                     other, ext, ext))
+			if icon_label_button(act, .Refresh, label, .Primary, dl.ytdlp == .Ready) {
+				for &t in it.tracks {
+					if dl_track_needs_format(it, &t) { t.replace = true; t.state = .Waiting }
+				}
 				it.state = .Queued
 				dl_save_soon()
 			}
@@ -1577,6 +1702,23 @@ draw_dl_card :: proc(it: ^Dl_Item, index: int, r: Rect) -> bool {
 		draw_dl_tracks(it, index, rect(r.x + px(12), r.y + px(DL_CARD_H), r.width - px(24), r.height - px(DL_CARD_H)))
 	}
 	return removed
+}
+
+// A downloaded track whose file is not in the card's audio format.
+dl_track_needs_format :: proc(it: ^Dl_Item, t: ^Dl_Track) -> bool {
+	if it.mode != .Audio || t.duplicate_of > 0 || t.path == "" { return false }
+	if t.state != .Done && t.state != .Skipped { return false }
+	want := DL_AUDIO_FORMAT_EXTS[clamp(it.audio_format, 0, len(DL_AUDIO_FORMAT_EXTS) - 1)]
+	if want == "" { return false }
+	// No os.exists here: this runs every frame, for every track, on what may
+	// be a spinning disk. A file gone since is reported by the job instead.
+	return !strings.equal_fold(filepath.ext(t.path), want)
+}
+
+dl_other_format :: proc(it: ^Dl_Item) -> int {
+	n := 0
+	for &t in it.tracks { if dl_track_needs_format(it, &t) { n += 1 } }
+	return n
 }
 
 @(private="file")

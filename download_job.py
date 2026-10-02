@@ -215,6 +215,9 @@ TRANSIENT = re.compile(r"\b(403|429|5\d\d)\b|Forbidden|Too Many Requests|timed? 
                        r"Temporary failure|getaddrinfo failed|fragment .* not found", re.IGNORECASE)
 RETRY_WAITS = (5.0, 20.0, 60.0)  # seconds before the 2nd, 3rd and 4th try
 
+# The extension each audio choice ends in; "best" keeps whatever the site has.
+TARGET_EXT = {"m4a": "m4a", "mp3": "mp3", "flac": "flac", "opus": "opus", "wav": "wav"}
+
 AUDIO_EXTS = {"mp3", "m4a", "opus", "ogg", "flac", "wav", "aac", "webm", "mka", "alac"}
 VIDEO_EXTS = {"mp4", "mkv", "webm", "mov", "avi", "m4v"}
 
@@ -270,7 +273,11 @@ class Runner:
             fmt = item.get("audio_format") or "best"
             # Chapters stay in the file as markers: a full soundtrack kept as
             # one file can still be stepped through track by track.
-            a += ["-f", "bestaudio/best", "-x", "--audio-format", fmt, "--embed-chapters"]
+            # For M4A, YouTube's own AAC stream when there is one: yt-dlp then
+            # only rewraps it, nothing is converted, and Premiere opens it.
+            # The default "bestaudio" is Opus, which Premiere does not open.
+            source = "bestaudio[ext=m4a]/bestaudio/best" if fmt == "m4a" else "bestaudio/best"
+            a += ["-f", source, "-x", "--audio-format", fmt, "--embed-chapters"]
             if fmt in ("mp3", "m4a", "aac", "opus", "vorbis"):
                 a += ["--audio-quality", item.get("audio_quality") or "0"]
             if item.get("embed_thumb", True) and fmt != "wav":
@@ -320,13 +327,21 @@ class Runner:
         return safe_filename(name or track.get("id") or "track")
 
     def already_there(self, item: dict, track: dict, folder: Path) -> str:
+        stem = self.target_name(item, track)
+        if track.get("replace"):
+            # Replacing a file with another format: only a file already in
+            # that format counts, never the one being replaced.
+            ext = TARGET_EXT.get(item.get("audio_format") or "", "")
+            candidate = folder / f"{stem}.{ext}"
+            if ext and candidate.exists() and os.path.normcase(str(candidate)) != os.path.normcase(track["replace"]):
+                return str(candidate)
+            return ""
         # Found by the video's id, so a file renamed since still counts.
         with self.lock:
             done = self.manifest.get(f"{track.get('id') or ''}:{item['mode']}")
         if done and Path(done).exists() and \
                 os.path.normcase(str(Path(done).parent)) == os.path.normcase(str(folder)):
             return done
-        stem = self.target_name(item, track)
         exts = AUDIO_EXTS if item["mode"] == "audio" else VIDEO_EXTS
         for ext in exts:
             candidate = folder / f"{stem}.{ext}"
@@ -496,11 +511,30 @@ class Runner:
             dest = self.place(src, item, track, folder)
         except (OSError, RuntimeError) as exc:
             return "error", str(exc)
+        replaced = ""
+        old = track.get("replace") or ""
+        if old and os.path.normcase(old) != os.path.normcase(str(dest)) and Path(old).exists():
+            replaced = self.retire(Path(old), dest)
         with self.lock:
             if tid:
                 self.manifest[f"{tid}:{item['mode']}"] = str(dest)
-        emit("track", key=key, id=tid, uid=track.get("uid"), state="done", path=str(dest))
+        emit("track", key=key, id=tid, uid=track.get("uid"), state="done", path=str(dest), replaced=replaced)
         return "done", str(dest)
+
+    def retire(self, old: Path, new: Path) -> str:
+        """The file a new format replaces: its sidecar (tags, markers) moves to
+        the new file, and the old file goes to the Recycle Bin, never deleted
+        outright. Returns how it went, for the app to show."""
+        old_side = old.parent / ".ts" / (old.name + ".json")
+        new_side = new.parent / ".ts" / (new.name + ".json")
+        if old_side.exists() and not new_side.exists():
+            try:
+                old_side.rename(new_side)
+            except OSError:
+                shutil.copy2(old_side, new_side)
+        if send_to_trash(old):
+            return "recycled"
+        return "kept"
 
     def _download(self, item: dict, track: dict) -> tuple[str, str]:
         key, tid = item["key"], track.get("id") or ""
@@ -657,6 +691,41 @@ class Runner:
             os.replace(tmp, self.manifest_path)
         except OSError:
             pass
+
+
+def send_to_trash(path: Path) -> bool:
+    """Recycle Bin on Windows, the desktop's trash elsewhere. False when there
+    is none; the file then stays where it is."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
+                        ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                        ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                        ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+
+        class SHQUERYRBINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("i64Size", ctypes.c_longlong),
+                        ("i64NumItems", ctypes.c_longlong)]
+
+        # A drive with no Recycle Bin (network shares, some USB drives) would
+        # delete for good, silently. There the old file stays.
+        root = os.path.splitdrive(str(path.resolve()))[0] + "\\"
+        info = SHQUERYRBINFO(ctypes.sizeof(SHQUERYRBINFO), 0, 0)
+        if ctypes.windll.shell32.SHQueryRecycleBinW(root, ctypes.byref(info)) != 0:
+            return False
+        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FOF_NOERRORUI = 3, 0x40, 0x10, 0x4, 0x400
+        op = SHFILEOPSTRUCTW(None, FO_DELETE, str(path.resolve()) + "\0", None,
+                             FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI, False, None, None)
+        return ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) == 0 and not path.exists()
+    for cmd in (["gio", "trash", str(path)], ["trash", str(path)]):
+        if shutil.which(cmd[0]):
+            subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL)
+            if not path.exists():
+                return True
+    return False
 
 
 def _ffmeta_escape(s: str) -> str:
