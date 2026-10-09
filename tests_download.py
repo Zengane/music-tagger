@@ -111,6 +111,26 @@ class NameTests(unittest.TestCase):
         p = parse_track("Resurrections - Lena Raine", "Z", pattern="title-artist")
         self.assertEqual((p["artist"], p["title"]), ("Lena Raine", "Resurrections"))
 
+    def test_game_name_inside_a_longer_collection_name(self):
+        # Miitopia, 2026-10: the playlist was "Miitopia OST (3DS/Switch,
+        # Complete)" and each video "Stage Event: Galados Isle - Miitopia".
+        # The game name alone was read as the title, the track name as artist.
+        album = guess_collection("Miitopia OST (3DS/Switch, Complete)", [])["name"]
+        titles = ["Stage Event: Galados Isle - Miitopia", "Map: Galados Isle - Miitopia",
+                  "Arrival: Peculia - Miitopia", "Ending: Divine Words- Miitopia"]
+        got = guess_tracks([{"title": t} for t in titles], album)
+        self.assertEqual([(p["artist"], p["title"]) for p in got], [
+            ("", "Stage Event: Galados Isle"), ("", "Map: Galados Isle"),
+            ("", "Arrival: Peculia"), ("", "Ending: Divine Words")])
+
+    def test_one_title_on_every_track_is_the_collection(self):
+        # Whatever the collection is called: a part shared by every track is
+        # not a track name.
+        titles = ["Field - Some Game", "Boss - Some Game", "Town - Some Game"]
+        got = guess_tracks([{"title": t} for t in titles], "Unrelated Playlist")
+        self.assertEqual([(p["artist"], p["title"]) for p in got],
+                         [("", "Field"), ("", "Boss"), ("", "Town")])
+
     def test_dashes_in_titles_are_not_artists(self):
         # Fewer than half the titles carry a dash: they are part of the names.
         entries = [{"title": t} for t in ["Main Theme", "Main Theme - Reprise", "Battle", "Ending", "Credits"]]

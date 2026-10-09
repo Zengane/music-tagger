@@ -219,6 +219,12 @@ def _remove_phrase(text: str, phrase: str) -> str:
     return re.sub(pattern, " ", text, flags=re.IGNORECASE)
 
 
+def _collection_core(collection: str) -> str:
+    """The game's own name inside a longer collection name:
+    'Miitopia OST (3DS/Switch, Complete)' -> 'Miitopia'."""
+    return clean_name(_BRACKETS.sub(" ", collection or ""))
+
+
 def parse_track(title: str, collection: str = "", index: int = 0,
                 pattern: str = "auto", uploader: str = "") -> dict:
     """Track number, artist and title from one video's title.
@@ -242,9 +248,15 @@ def parse_track(title: str, collection: str = "", index: int = 0,
     text = _BRACKETS.sub(bracket, text)
     if collection:
         # "Super Mario Galaxy OST - Gusty Garden" and "... - Celeste OST":
-        # the part that is the collection plus noise goes entirely.
+        # the part that is the collection plus noise goes entirely. The game
+        # alone counts too: "Field - Miitopia" in "Miitopia OST (Complete)".
+        core = _collection_core(collection)
+        if core:
+            # "Divine Words- Miitopia": a dash without its space before.
+            text = re.sub(r"\s*[-–—]\s*" + re.escape(core) + r"\s*$", "", text, flags=re.IGNORECASE)
         parts = [p for p in _DASH.split(text) if p.strip()]
-        kept = [p for p in parts if not _is_noise(_remove_phrase(p, collection))]
+        kept = [p for p in parts if not _is_noise(_remove_phrase(p, collection))
+                and not (core and _is_noise(_remove_phrase(p, core)))]
         if kept and len(kept) < len(parts):
             text = " - ".join(kept)
     parts = [p.strip() for p in _DASH.split(text) if p.strip()]
@@ -291,7 +303,8 @@ def parse_track(title: str, collection: str = "", index: int = 0,
     }
 
 
-def guess_tracks(entries: list[dict], collection: str, pattern: str = "auto") -> list[dict]:
+def guess_tracks(entries: list[dict], collection: str, pattern: str = "auto",
+                 _retry: bool = True) -> list[dict]:
     """parse_track over a playlist, with one look at the whole.
 
     Two checks need every title at once:
@@ -307,6 +320,13 @@ def guess_tracks(entries: list[dict], collection: str, pattern: str = "auto") ->
         if with_artist and with_artist < len(parsed) / 2:
             parsed = [parse_track(e.get("title", ""), collection, i + 1, "title", e.get("uploader") or "")
                       for i, e in enumerate(entries)]
+    # One title on most tracks is the game, wherever it sits: "Field - Some
+    # Game" read as artist "Field", title "Some Game". Read again without it.
+    titles = [p["title"] for p in parsed]
+    if _retry and len(titles) >= 3:
+        common = max(set(titles), key=titles.count)
+        if titles.count(common) > len(titles) / 2 and fold(common) != fold(collection):
+            return guess_tracks(entries, common, pattern, _retry=False)
     numbers = [p["track"] for p in parsed]
     if len(set(numbers)) != len(numbers):
         for i, p in enumerate(parsed):
