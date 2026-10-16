@@ -3,6 +3,11 @@ r"""Assemble a shareable copy of Music Tagger for the platform it runs on.
     venv\Scripts\python.exe make_release.py      (Windows)
     venv/bin/python make_release.py               (macOS, Linux)
 
+    --exe PATH   package this build instead of the one in the repo root
+    --out DIR    write into DIR instead of dist/
+    --installer  also compile installer/MusicTagger.iss (Windows, needs Inno
+                 Setup 6) into MusicTagger-Setup.exe beside the zip
+
 Produces `dist/MusicTagger/` and a zip beside it, named for the platform. The app reads everything
 relative to its own .exe, so the release is a folder you unzip anywhere — there
 is nothing to register and nothing to uninstall.
@@ -26,11 +31,13 @@ machine instead, and the app works without it for everything except the AI.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
 import shutil
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -43,7 +50,6 @@ PLATFORM = {"nt": "windows"}.get(os.name, "macos" if sys.platform == "darwin" el
 
 # Everything the app or its jobs import at run time.
 FILES = [
-    EXE,
     "media_job.py",
     "search_server.py",
     "tag_job.py",
@@ -77,8 +83,30 @@ def base_tag_library(src: Path) -> dict:
     return doc
 
 
+def find_iscc() -> Path | None:
+    """Inno Setup's compiler, from PATH or where its installer puts it."""
+    found = shutil.which("iscc")
+    if found:
+        return Path(found)
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
+                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")):
+        if base and (Path(base) / "Inno Setup 6" / "ISCC.exe").exists():
+            return Path(base) / "Inno Setup 6" / "ISCC.exe"
+    return None
+
+
 def main() -> int:
-    exe = ROOT / EXE
+    global OUT
+    ap = argparse.ArgumentParser(description="Package Music Tagger for sharing.")
+    ap.add_argument("--exe", help="the built program to package")
+    ap.add_argument("--out", help="folder to write into (default: dist)")
+    ap.add_argument("--installer", action="store_true",
+                    help="also build MusicTagger-Setup.exe with Inno Setup")
+    args = ap.parse_args()
+    dist = Path(args.out).resolve() if args.out else ROOT / "dist"
+    OUT = dist / "MusicTagger"
+
+    exe = Path(args.exe).resolve() if args.exe else ROOT / EXE
     if not exe.exists():
         print(f"Build {EXE} first ({'build.bat' if WINDOWS else './build.sh'}).")
         return 1
@@ -86,6 +114,7 @@ def main() -> int:
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
+    shutil.copy2(exe, OUT / EXE)
 
     missing = []
     for name in FILES:
@@ -135,7 +164,7 @@ def main() -> int:
         for m in missing:
             print("   ", m)
 
-    zip_path = ROOT / "dist" / f"MusicTagger-{PLATFORM}-{platform.machine().lower()}.zip"
+    zip_path = dist / f"MusicTagger-{PLATFORM}-{platform.machine().lower()}.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -170,6 +199,27 @@ def main() -> int:
         print("ERROR: the Premiere panel did not make it into the package")
         return 1
     print("the Premiere panel and its installer are in the package")
+
+    if args.installer:
+        if not WINDOWS:
+            print("ERROR: --installer is Windows only")
+            return 1
+        iscc = find_iscc()
+        if iscc is None:
+            print("ERROR: Inno Setup 6 not found. Install it with")
+            print("    winget install --id JRSoftware.InnoSetup -e")
+            return 1
+        version = subprocess.run([sys.executable, str(ROOT / "ui" / "build_id.py")],
+                                 capture_output=True, text=True).stdout.strip() or "dev"
+        r = subprocess.run([str(iscc), "/Q", f"/DSourceDir={OUT}", f"/DOutDir={dist}",
+                            f"/DAppVersion={version}", f"/DIconFile={ROOT / 'MusicTagger.ico'}",
+                            str(ROOT / "installer" / "MusicTagger.iss")])
+        if r.returncode != 0:
+            print("ERROR: Inno Setup failed")
+            return 1
+        setup = dist / "MusicTagger-Setup.exe"
+        print(f"{setup}")
+        print(f"  {setup.stat().st_size/1e6:.1f} MB")
     return 0
 
 

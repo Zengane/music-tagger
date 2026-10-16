@@ -179,3 +179,17 @@ Open issues: `docs/audit-2026-10.md`. Model notes: `docs/audio-models.md`,
   Opus. Finished cards in another format offer "Replace N as M4A".
 - Not done: other sites than YouTube untried; a full-OST video downloads whole
   even when only some chapters are wanted.
+
+---
+
+## Releases, done 2026-10-16
+
+- GitHub: `https://github.com/Zengane/music-tagger`. Release files:
+  `MusicTagger-Setup.exe` (Inno Setup, per user, no admin, into
+  `%LOCALAPPDATA%\Programs\MusicTagger`) and `MusicTagger-windows-amd64.zip`.
+- Build them without touching the owner's exe: build into the scratchpad,
+  then `make_release.py --exe <scratch exe> --out <scratch dir> --installer`.
+  Installer script: `installer/MusicTagger.iss`. Inno Setup is installed per
+  user (`%LOCALAPPDATA%\Programs\Inno Setup 6`).
+- Test: install with `MusicTagger-Setup.exe /VERYSILENT /DIR=<scratch>`, run
+  `MusicTagger.exe --selftest` there, then `unins000.exe /VERYSILENT`.

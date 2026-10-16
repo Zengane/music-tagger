@@ -82,9 +82,23 @@ them.
 
 ## Installing
 
-Download the release for your system, unzip it anywhere, and run
-`MusicTagger.exe` (Windows) or `./MusicTagger` (macOS, Linux). Nothing is
-installed and nothing is written outside the folder — delete it to remove it.
+Get the latest build from the
+[Releases page](https://github.com/Zengane/music-tagger/releases/latest).
+
+**Windows, the easy way:** download `MusicTagger-Setup.exe` and run it. It
+needs no admin rights and installs for you only, into
+`%LOCALAPPDATA%\Programs\MusicTagger`. At the end it offers to set up the AI
+features (see below). The Start menu gets Music Tagger, "Set up AI features"
+and "Install Premiere panel". Uninstall from Windows Settings → Apps; your
+tags stay, because they live beside your own files.
+
+Windows may show "Windows protected your PC", because the installer is not
+signed. Click **More info**, then **Run anyway**.
+
+**Or the zip:** download `MusicTagger-windows-amd64.zip`, unzip it anywhere,
+and run `MusicTagger.exe` (Windows) or `./MusicTagger` (macOS, Linux). Nothing
+is installed and nothing is written outside the folder — delete it to remove
+it. macOS and Linux build from source for now (see Building).
 
 For the AI features, run `setup.bat` (Windows) or `./setup.sh` (macOS, Linux)
 once. It needs Python 3.12 or 3.13, builds the Python environment, and finds or
@@ -128,6 +142,25 @@ Or directly:
 ```bat
 odin build ui -out:MusicTagger.exe -o:speed -subsystem:windows -resource:app.rc
 odin build ui -out:mtag-test.exe -o:speed
+```
+
+## Making a release
+
+```bat
+venv\Scripts\python.exe make_release.py --installer
+```
+
+This packages `MusicTagger.exe` with the jobs, `model	agger.pkl` and the
+Premiere panel into `dist\MusicTagger\`, zips it, and (with `--installer`)
+builds `dist\MusicTagger-Setup.exe` from `installer\MusicTagger.iss`. That
+needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install --id JRSoftware.InnoSetup -e`). `--exe <path>` packages a
+build from somewhere else; `--out <folder>` writes somewhere else than `dist`.
+
+Upload both files to a GitHub release:
+
+```bat
+gh release create v<date> dist\MusicTagger-Setup.exe dist\MusicTagger-windows-amd64.zip
 ```
 
 ## Checking it works
