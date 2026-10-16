@@ -116,7 +116,9 @@ rail_header :: proc(inner: Rect, y: f32, section: Rail_Section, label: cstring) 
 	draw_text_mid(.Bold, label, head.x + px(20), head.y, head.height, FS_LABEL, over ? TEXT_DIM : TEXT_FAINT)
 	plus = rect(inner.x + inner.width - px(30), y + px(1), px(22), px(22))
 	// The header toggles, but not where a button sits on it.
-	if clicked_in(head) && !hovered(plus) {
+	// The button is asked first: clicked_in takes the click, and checking the
+	// header first swallowed every press on + (Add a folder did nothing).
+	if !hovered(plus) && clicked_in(head) {
 		app.rail_open[section] = !open
 		open = !open
 	}
